@@ -23,6 +23,10 @@ interface UIState {
   projectFilter?: string
   setProjectFilter(id?: string): void
   confetti?: ConfettiRef | null
+  /** Task whose attached list is open in the list sheet */
+  listTaskId?: string
+  openList(taskId: string): void
+  closeList(): void
 }
 
 export const useUI = create<UIState>()((set) => ({
@@ -51,4 +55,6 @@ export const useUI = create<UIState>()((set) => ({
   setSettingsOpen: (settingsOpen) => set({ settingsOpen }),
   setWipPending: (wipPending) => set({ wipPending }),
   setProjectFilter: (projectFilter) => set({ projectFilter }),
+  openList: (listTaskId) => set({ listTaskId }),
+  closeList: () => set({ listTaskId: undefined }),
 }))

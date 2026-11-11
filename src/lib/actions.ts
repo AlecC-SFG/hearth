@@ -22,17 +22,13 @@ export function completeTask(id: string) {
   const s = useStore.getState()
   const task = s.tasks.find((t) => t.id === id)
   if (!task) return
-  const spawnedId = s.completeTask(id)
+  s.completeTask(id)
   celebrate()
   toast.success(ENCOURAGEMENT[Math.floor(Math.random() * ENCOURAGEMENT.length)], {
     description: task.recurrence !== "none" ? `“${task.title}” will come back ${task.recurrence === "daily" ? "tomorrow" : "next week"}.` : task.title,
     action: {
       label: "Undo",
-      onClick: () => {
-        const st = useStore.getState()
-        if (spawnedId) st.removeTask(spawnedId)
-        st.restoreTask(task)
-      },
+      onClick: () => useStore.getState().reopenTask(id, { undo: true }),
     },
   })
 }
@@ -73,5 +69,25 @@ export function parkTask(id: string) {
   toast("Parked for later", {
     description: t ? `${t.title} — it'll wait for you.` : undefined,
     action: { label: "Undo", onClick: () => useStore.getState().setStatus(id, t?.status ?? "todo") },
+  })
+}
+
+/** "Not done yet": put a completed task back, tagged with who reopened it. */
+export function reopenWithToast(id: string) {
+  const s = useStore.getState()
+  const t = s.tasks.find((x) => x.id === id)
+  if (!t || t.status !== "done") return
+  const snapshot = { ...t }
+  s.reopenTask(id)
+  toast("Moved back to not done", {
+    description: t.title,
+    action: {
+      label: "Undo",
+      onClick: () => {
+        const st = useStore.getState()
+        // Put it back exactly as it was (done, credited to the same person)
+        st.completeTask(id, snapshot.completedBy)
+      },
+    },
   })
 }

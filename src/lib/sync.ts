@@ -15,9 +15,9 @@ import { del as idbDel, get as idbGet, set as idbSet } from "idb-keyval"
 import type { RealtimeChannel } from "@supabase/supabase-js"
 import { ensureSession, friendlyError, supabase } from "./supabase"
 import { useStore, type Household } from "./store"
-import type { Member, Project, Task } from "./types"
+import type { ListItem, Member, Project, Task } from "./types"
 
-type Kind = "member" | "project" | "task" | "history"
+type Kind = "member" | "project" | "task" | "history" | "listitem"
 interface Row {
   kind: Kind
   id: string
@@ -38,8 +38,12 @@ export const useSync = create<{ status: SyncStatus; error?: string; lastSyncedAt
   pendingCount: 0,
 }))
 
-const PENDING_KEY = "hearth-sync-pending"
-const CURSOR_KEY = "hearth-sync-cursor"
+// Per-household keys, so switching households never mixes queues or bookmarks.
+const pendingKey = (house: string) => `hearth-sync-pending:${house}`
+const cursorKey = (house: string) => `hearth-sync-cursor:${house}`
+// Single-household builds (v0.2.0) used these; read once for upgrades.
+const LEGACY_PENDING_KEY = "hearth-sync-pending"
+const LEGACY_CURSOR_KEY = "hearth-sync-cursor"
 const CHUNK = 200
 
 let pending = new Map<string, Change>()
@@ -49,6 +53,8 @@ let currentHouse: string | undefined
 let flushTimer: ReturnType<typeof setTimeout> | undefined
 let retryTimer: ReturnType<typeof setTimeout> | undefined
 let flushing = false
+/** Set when the server rejected list items (database patch 002 not applied yet) */
+let listsBlocked = false
 
 const keyOf = (kind: Kind, id: string) => `${kind}:${id}`
 const setStatus = (status: SyncStatus, error?: string) =>
@@ -61,7 +67,7 @@ const setStatus = (status: SyncStatus, error?: string) =>
 type Snap = Record<Kind, Map<string, unknown>>
 type StoreState = ReturnType<typeof useStore.getState>
 
-function snapshot(s: Pick<StoreState, "members" | "projects" | "tasks" | "history">): Snap {
+function snapshot(s: Pick<StoreState, "members" | "projects" | "tasks" | "history" | "listItems">): Snap {
   const history = new Map<string, unknown>()
   for (const [day, byMember] of Object.entries(s.history)) {
     for (const [mid, n] of Object.entries(byMember)) history.set(`${day}|${mid}`, n)
@@ -71,6 +77,7 @@ function snapshot(s: Pick<StoreState, "members" | "projects" | "tasks" | "histor
     project: new Map(s.projects.map((p) => [p.id, p])),
     task: new Map(s.tasks.map((t) => [t.id, t])),
     history,
+    listitem: new Map(s.listItems.map((i) => [i.id, i])),
   }
 }
 
@@ -94,7 +101,7 @@ function enqueue(changes: Change[]) {
   flushTimer = setTimeout(() => void flush(), 400)
 }
 
-function enqueueEverything() {
+export function enqueueEverything() {
   const snap = snapshot(useStore.getState())
   const all: Change[] = []
   for (const kind of Object.keys(snap) as Kind[]) for (const [id, v] of snap[kind]) all.push({ kind, id, data: v })
@@ -102,8 +109,9 @@ function enqueueEverything() {
 }
 
 async function savePending() {
+  if (!currentHouse) return
   try {
-    await idbSet(PENDING_KEY, { house: currentHouse, changes: [...pending.values()] })
+    await idbSet(pendingKey(currentHouse), [...pending.values()])
   } catch {
     /* storage unavailable: the queue still lives in memory */
   }
@@ -111,8 +119,13 @@ async function savePending() {
 
 async function loadPending(house: string) {
   try {
-    const saved = await idbGet<{ house?: string; changes: Change[] }>(PENDING_KEY)
-    if (saved?.house === house) for (const c of saved.changes) pending.set(keyOf(c.kind, c.id), c)
+    const saved = await idbGet<Change[]>(pendingKey(house))
+    for (const c of saved ?? []) pending.set(keyOf(c.kind, c.id), c)
+    const legacy = await idbGet<{ house?: string; changes: Change[] }>(LEGACY_PENDING_KEY)
+    if (legacy?.house === house) {
+      for (const c of legacy.changes) if (!pending.has(keyOf(c.kind, c.id))) pending.set(keyOf(c.kind, c.id), c)
+      await idbDel(LEGACY_PENDING_KEY)
+    }
   } catch {
     /* ignore */
   }
@@ -121,7 +134,14 @@ async function loadPending(house: string) {
 // Watch the store for local edits
 useStore.subscribe((next, prev) => {
   if (applyingRemote || !next.household || next.household.id !== prev.household?.id) return
-  if (next.members === prev.members && next.projects === prev.projects && next.tasks === prev.tasks && next.history === prev.history) return
+  if (
+    next.members === prev.members &&
+    next.projects === prev.projects &&
+    next.tasks === prev.tasks &&
+    next.history === prev.history &&
+    next.listItems === prev.listItems
+  )
+    return
   enqueue(diff(snapshot(prev), snapshot(next)))
 })
 
@@ -135,37 +155,60 @@ function isRlsError(e: { code?: string; message?: string } | null) {
 
 async function flush() {
   if (!supabase || !currentHouse || flushing || pending.size === 0) return
+  const house = currentHouse
+  const queue = pending
   if (!navigator.onLine) return setStatus("offline")
   flushing = true
+  listsBlocked = false
+  let failed = false
   setStatus("syncing")
   try {
-    const batch = [...pending.entries()]
+    const batch = [...queue.entries()]
     for (let i = 0; i < batch.length; i += CHUNK) {
       const slice = batch.slice(i, i + CHUNK)
       const rows = slice.map(([, c]) => ({
-        household_id: currentHouse,
+        household_id: house,
         kind: c.kind,
         id: c.id,
         data: c.data ?? null,
         deleted: c.data == null,
       }))
-      const { error } = await supabase.from("items").upsert(rows, { onConflict: "household_id,kind,id" })
+      let { error } = await supabase.from("items").upsert(rows, { onConflict: "household_id,kind,id" })
+      let sent = slice
+      if (error?.code === "23514" && rows.some((r) => r.kind === "listitem")) {
+        // Server hasn't been updated for lists yet: send everything else, keep list items queued
+        const others = rows.filter((r) => r.kind !== "listitem")
+        sent = slice.filter(([, c]) => c.kind !== "listitem")
+        error = others.length ? (await supabase.from("items").upsert(others, { onConflict: "household_id,kind,id" })).error : null
+        if (!error) listsBlocked = true
+      }
       if (error) {
         if (isRlsError(error)) throw new Error("This phone is no longer part of the household. Join again from Settings.")
         throw error
       }
       // Only drop entries that weren't edited again while we were uploading
-      for (const [k, c] of slice) if (pending.get(k) === c) pending.delete(k)
+      for (const [k, c] of sent) if (queue.get(k) === c) queue.delete(k)
+      if (house !== currentHouse) {
+        // Switched households mid-upload: save what is left of the old queue under its own key
+        await idbSet(pendingKey(house), [...queue.values()]).catch(() => {})
+        return
+      }
     }
     await savePending()
-    setStatus("synced")
+    if (listsBlocked) {
+      setStatus("error", "Lists can't sync until the Hearth server is updated. Everything else is syncing.")
+      scheduleRetry()
+    } else setStatus("synced")
   } catch (e) {
+    failed = true
     setStatus(navigator.onLine ? "error" : "offline", friendlyError(e))
     scheduleRetry()
   } finally {
     flushing = false
   }
-  if (pending.size) {
+  // New edits arrived during a successful upload: send them too. After a failure,
+  // or with list items held back, wait for the 20-second retry instead of hammering.
+  if (pending.size && !failed && !listsBlocked) {
     if (flushTimer) clearTimeout(flushTimer)
     flushTimer = setTimeout(() => void flush(), 400)
   }
@@ -187,12 +230,13 @@ function applyRows(rows: Row[]) {
   applyingRemote = true
   try {
     useStore.setState((s) => {
-      let { members, projects, tasks, history } = s
+      let { members, projects, tasks, history, listItems } = s
       for (const row of rows) {
         if (pending.has(keyOf(row.kind, row.id))) continue // our newer local edit wins until pushed
         if (row.kind === "member") members = upsertIn<Member>(members, row, false)
         else if (row.kind === "project") projects = upsertIn<Project>(projects, row, false)
         else if (row.kind === "task") tasks = upsertIn<Task>(tasks, row, true)
+        else if (row.kind === "listitem") listItems = upsertIn<ListItem>(listItems, row, false)
         else if (row.kind === "history") {
           const [day, mid] = row.id.split("|")
           const dayMap = { ...history[day] }
@@ -201,7 +245,7 @@ function applyRows(rows: Row[]) {
           history = { ...history, [day]: dayMap }
         }
       }
-      return { members, projects, tasks, history }
+      return { members, projects, tasks, history, listItems }
     })
   } finally {
     applyingRemote = false
@@ -211,10 +255,14 @@ function applyRows(rows: Row[]) {
 async function pull() {
   if (!supabase || !currentHouse) return
   const house = currentHouse
-  const saved = await idbGet<{ house: string; at: string }>(CURSOR_KEY).catch(() => undefined)
+  let at = await idbGet<string>(cursorKey(house)).catch(() => undefined)
+  if (!at) {
+    const legacy = await idbGet<{ house: string; at: string }>(LEGACY_CURSOR_KEY).catch(() => undefined)
+    if (legacy?.house === house) at = legacy.at
+  }
   // Re-read a 30 s overlap so rows committed slightly out of order aren't missed
-  let since = saved?.house === house ? new Date(new Date(saved.at).getTime() - 30_000).toISOString() : undefined
-  let last = saved?.house === house ? saved.at : undefined
+  let since = at ? new Date(new Date(at).getTime() - 30_000).toISOString() : undefined
+  let last = at
   for (;;) {
     let q = supabase.from("items").select("kind,id,data,deleted,updated_at").eq("household_id", house).order("updated_at").limit(1000)
     if (since) q = q.gte("updated_at", since)
@@ -227,7 +275,7 @@ async function pull() {
     if (rows.length < 1000) break
     since = last
   }
-  if (last) await idbSet(CURSOR_KEY, { house, at: last }).catch(() => {})
+  if (last && house === currentHouse) await idbSet(cursorKey(house), last).catch(() => {})
   await refreshHousehold()
 }
 
@@ -276,7 +324,7 @@ async function resync() {
   }
 }
 
-function stopSync() {
+export function stopSync() {
   if (channel) void supabase?.removeChannel(channel)
   channel = null
   currentHouse = undefined
@@ -331,94 +379,29 @@ if (typeof window !== "undefined") {
 }
 
 /* ------------------------------------------------------------------ */
-/* Household actions                                                   */
+/* Helpers for households.ts                                           */
 /* ------------------------------------------------------------------ */
 
-interface HouseRow {
-  id: string
-  name: string
-  join_code: string
-}
-const toHousehold = (r: HouseRow): Household => ({ id: r.id, name: r.name, joinCode: r.join_code })
-
-/** Create a household and upload everything currently on this device into it. */
-export async function createHousehold(name: string): Promise<Household> {
-  if (!supabase) throw new Error("Sync isn't available in this version.")
-  await ensureSession()
-  const { data, error } = await supabase.rpc("create_household", { p_name: name })
-  if (error) throw new Error(friendlyError(error))
-  const h = toHousehold(data as HouseRow)
-  await idbDel(CURSOR_KEY).catch(() => {})
-  useStore.getState().setHousehold(h)
-  await startSync()
-  enqueueEverything()
-  return h
+/** Push queued changes now (best effort, gives up after a few seconds). */
+export async function flushNow(timeoutMs = 4000) {
+  if (flushTimer) clearTimeout(flushTimer)
+  await Promise.race([flush(), new Promise((r) => setTimeout(r, timeoutMs))])
 }
 
-/** Join a household by code. This device's current lists are replaced by the household's. */
-export async function joinHousehold(code: string): Promise<Household> {
-  if (!supabase) throw new Error("Sync isn't available in this version.")
-  await ensureSession()
-  const { data, error } = await supabase.rpc("join_household", { p_code: code })
-  if (error) throw new Error(friendlyError(error))
-  if ((data as { error?: string })?.error) throw new Error((data as { error: string }).error)
-  const h = toHousehold(data as HouseRow)
-  stopSync()
-  await idbDel(PENDING_KEY).catch(() => {})
-  await idbDel(CURSOR_KEY).catch(() => {})
+/** Remove a household's queue and bookmark from this phone. */
+export async function forgetSyncState(house: string) {
+  await idbDel(pendingKey(house)).catch(() => {})
+  await idbDel(cursorKey(house)).catch(() => {})
+}
+
+/** Run a store update without it being queued for upload. */
+export function withoutSync(fn: () => void) {
   applyingRemote = true
   try {
-    const s = useStore.getState()
-    useStore.setState({
-      onboarded: true,
-      household: h,
-      members: [],
-      projects: [],
-      tasks: [],
-      history: {},
-      focus: undefined,
-      settings: { ...s.settings, currentMemberId: undefined },
-    })
+    fn()
   } finally {
     applyingRemote = false
   }
-  await startSync()
-  return h
-}
-
-/** Stop syncing on this phone. Its current lists stay on the phone. */
-export async function leaveHousehold() {
-  const h = useStore.getState().household
-  stopSync()
-  await idbDel(PENDING_KEY).catch(() => {})
-  await idbDel(CURSOR_KEY).catch(() => {})
-  useStore.getState().setHousehold(undefined)
-  if (supabase && h) {
-    const { data } = await supabase.auth.getSession()
-    const uid = data.session?.user.id
-    if (uid) await supabase.from("household_members").delete().eq("household_id", h.id).eq("user_id", uid)
-  }
-}
-
-export async function newJoinCode(): Promise<string> {
-  const h = useStore.getState().household
-  if (!supabase || !h) throw new Error("Not in a household")
-  const { data, error } = await supabase.rpc("rotate_join_code", { p_household: h.id })
-  if (error) throw new Error(friendlyError(error))
-  useStore.getState().setHousehold({ ...h, joinCode: data as string })
-  return data as string
-}
-
-export async function renameHousehold(name: string) {
-  const h = useStore.getState().household
-  if (!supabase || !h) return
-  const { error } = await supabase.from("households").update({ name }).eq("id", h.id)
-  if (error) throw new Error(friendlyError(error))
-  useStore.getState().setHousehold({ ...h, name })
-}
-
-export function joinLink(code: string): string {
-  return `${location.origin}${import.meta.env.BASE_URL}?join=${encodeURIComponent(code)}`
 }
 
 /** Test hook: lets the test suite inspect the queue. */

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react"
 import { addDays, nextSaturday } from "date-fns"
-import { Check, ChevronDown, GripVertical, Lock, Plus, Trash2, X } from "lucide-react"
+import { Check, CheckCircle2, ChevronDown, GripVertical, ListChecks, Lock, Plus, RotateCcw, Trash2, X } from "lucide-react"
+import { formatDistanceToNow } from "date-fns"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import { Command, CommandEmpty, CommandInput, CommandItem, CommandList } from "@/components/ui/command"
@@ -9,7 +10,8 @@ import { Slider } from "@/components/ui/slider"
 import { Textarea } from "@/components/ui/textarea"
 import { ResponsiveModal } from "@/components/responsive-modal"
 import { MemberAvatar, Segmented } from "@/components/bits"
-import { deleteTask } from "@/lib/actions"
+import { Checklist, useListItems } from "@/components/checklist"
+import { deleteTask, reopenWithToast } from "@/lib/actions"
 import { formatMinutes, fromLocalInput, toLocalInput } from "@/lib/format"
 import { createsCycle } from "@/lib/priority"
 import { makeTask, useStore } from "@/lib/store"
@@ -66,6 +68,7 @@ export function TaskEditor() {
   const me = useStore((s) => s.settings.currentMemberId)
   const addTask = useStore((s) => s.addTask)
   const updateTask = useStore((s) => s.updateTask)
+  const live = useStore((s) => (editing && editing !== "new" ? s.tasks.find((t) => t.id === editing) : undefined))
 
   const existing = editing && editing !== "new" ? tasks.find((t) => t.id === editing) : undefined
   const [draft, setDraft] = useState<Task | null>(null)
@@ -73,6 +76,8 @@ export function TaskEditor() {
   const [stepText, setStepText] = useState("")
   const [resText, setResText] = useState("")
   const [depOpen, setDepOpen] = useState(false)
+  const [showList, setShowList] = useState(false)
+  const listItems = useListItems(draft?.id)
 
   useEffect(() => {
     if (!editing) return
@@ -82,6 +87,7 @@ export function TaskEditor() {
     setStepText("")
     setResText("")
     setDepOpen(false)
+    setShowList(false)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editing])
 
@@ -101,11 +107,40 @@ export function TaskEditor() {
     const steps = pending ? [...draft.steps, { id: uid(), title: pending, done: false }] : draft.steps
     const final = { ...draft, title, steps }
     if (isNew) {
-      const { id: _id, createdAt: _c, updatedAt: _u, ...rest } = final
-      addTask(rest)
+      const { createdAt: _c, updatedAt: _u, ...rest } = final
+      addTask(rest) // keeps the draft's id, so a list started here stays attached
       toast.success("Added", { description: title })
     } else {
-      updateTask(final.id, final)
+      // Only save what this form edits. Completion state and focus time may have
+      // changed on another phone (or via "Not done yet") while the form was open.
+      const {
+        status: _st,
+        completedAt: _ca,
+        completedBy: _cb,
+        beforeDone: _bd,
+        nextOccurrenceId: _no,
+        reopenedBy: _rb,
+        reopenedAt: _ra,
+        timeSpentMin: _ts,
+        dailyMin: _dm,
+        createdAt: _cr,
+        ...editable
+      } = final
+      if (live?.status === "done") {
+        // Steps were all ticked when it was completed; don't overwrite that snapshot
+        delete (editable as Partial<Task>).steps
+        delete (editable as Partial<Task>).progress
+      }
+      updateTask(final.id, editable)
+    }
+    close()
+  }
+
+  // Cancelling a brand-new task also discards any list started on it
+  const dismiss = () => {
+    if (isNew) {
+      const st = useStore.getState()
+      for (const i of st.listItems.filter((x) => x.taskId === draft.id)) st.removeListItem(i.id)
     }
     close()
   }
@@ -129,7 +164,7 @@ export function TaskEditor() {
   return (
     <ResponsiveModal
       open={!!editing}
-      onOpenChange={(o) => !o && close()}
+      onOpenChange={(o) => !o && dismiss()}
       title={isNew ? "New task" : "Edit task"}
       className="md:max-w-xl"
       footer={
@@ -139,7 +174,7 @@ export function TaskEditor() {
               <Trash2 /> Delete
             </Button>
           )}
-          <Button variant="outline" onClick={close} className="hidden md:inline-flex">
+          <Button variant="outline" onClick={dismiss} className="hidden md:inline-flex">
             Cancel
           </Button>
           <Button onClick={save}>{isNew ? "Add task" : "Save"}</Button>
@@ -161,6 +196,28 @@ export function TaskEditor() {
           className="h-12 rounded-xl text-lg font-medium md:text-lg"
           aria-label="Task title"
         />
+
+        {live?.status === "done" && (
+          <div className="flex items-center gap-3 rounded-xl border border-success/30 bg-success/10 p-3 text-sm">
+            <CheckCircle2 className="size-5 shrink-0 text-success" />
+            <div className="min-w-0 flex-1">
+              <div className="font-medium">
+                Done{live.completedBy && members.find((m) => m.id === live.completedBy) ? ` by ${members.find((m) => m.id === live.completedBy)!.name}` : ""}
+              </div>
+              {live.completedAt && <div className="text-xs text-muted-foreground">{formatDistanceToNow(new Date(live.completedAt), { addSuffix: true })}</div>}
+            </div>
+            <Button type="button" size="sm" variant="outline" onClick={() => reopenWithToast(live.id)}>
+              <RotateCcw /> Not done yet
+            </Button>
+          </div>
+        )}
+        {live?.status !== "done" && live?.reopenedBy && (
+          <div className="flex items-center gap-2 rounded-xl bg-warm/15 p-3 text-sm">
+            <RotateCcw className="size-4 shrink-0" />
+            Reopened by {members.find((m) => m.id === live.reopenedBy)?.name ?? "someone"}
+            {live.reopenedAt && <span className="text-muted-foreground">· {formatDistanceToNow(new Date(live.reopenedAt), { addSuffix: true })}</span>}
+          </div>
+        )}
 
         {draft.resumeNote && !isNew && (
           <div className="rounded-xl border border-primary/30 bg-primary/8 p-3 text-sm">
@@ -249,6 +306,24 @@ export function TaskEditor() {
             ]}
           />
         </Field>
+
+        {listItems.length > 0 || showList ? (
+          <Field label="List" hint="Everyone in the household can edit it">
+            <Checklist taskId={draft.id} autoFocus={showList && listItems.length === 0} placeholder="Add an item, e.g. milk, eggs, bread" />
+          </Field>
+        ) : (
+          <button
+            type="button"
+            onClick={() => setShowList(true)}
+            className="flex w-full items-center gap-3 rounded-xl border border-dashed px-3 py-2.5 text-left text-sm hover:bg-muted/50"
+          >
+            <ListChecks className="size-4 text-primary" />
+            <span>
+              <span className="font-medium">Add a list</span>
+              <span className="text-muted-foreground">: groceries, packing, supplies…</span>
+            </span>
+          </button>
+        )}
 
         <Field label="Tiny steps" hint="Small steps are easier to start">
           <ul className="space-y-1.5">

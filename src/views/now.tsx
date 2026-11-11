@@ -1,11 +1,12 @@
 import { useMemo, useState } from "react"
 import NumberFlow from "@number-flow/react"
-import { ArrowRight, Check, Coffee, MapPin, Play, Plus, Shuffle, Timer } from "lucide-react"
+import { ArrowRight, Check, Coffee, ListChecks, MapPin, Play, Plus, RotateCcw, Shuffle, Timer } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { AnimatedCircularProgressBar } from "@/components/ui/animated-circular-progress-bar"
 import { BorderBeam } from "@/components/ui/border-beam"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { Chip, DueChip, EmptyState, Segmented } from "@/components/bits"
+import { useListItems } from "@/components/checklist"
 import { TaskRow } from "@/components/task-row"
 import { isMine, useMe, useRanked } from "@/hooks/use-ranked"
 import { completeTask, requestFocus } from "@/lib/actions"
@@ -55,6 +56,8 @@ export function NowView() {
   const toggleStep = useStore((s) => s.toggleStep)
   const projects = useStore((s) => s.projects)
   const newTask = useUI((u) => u.newTask)
+  const openList = useUI((u) => u.openList)
+  const members = useStore((s) => s.members)
   const [time, setTime] = useState<TimeFilter>("any")
   const [energy, setEnergy] = useState<EnergyFilter>("any")
   const [skip, setSkip] = useState(0)
@@ -74,6 +77,8 @@ export function NowView() {
   const hero = candidates[skip]
   const project = hero && projects.find((p) => p.id === hero.task.projectId)
   const nextStep = hero?.task.steps.find((s) => !s.done)
+  const heroList = useListItems(hero?.task.id)
+  const heroListLeft = heroList.filter((i) => !i.done).length
   const doing = allDoing.filter((s) => s.task.id !== hero?.task.id)
 
   const setFilter = (fn: () => void) => {
@@ -160,6 +165,38 @@ export function NowView() {
               />
             )}
           </div>
+
+          {hero.task.reopenedBy && (
+            <div className="mt-4 flex items-center gap-2 rounded-2xl bg-warm/15 p-3 text-sm">
+              <RotateCcw className="size-4 shrink-0" />
+              <span>
+                <span className="font-medium">{members.find((m) => m.id === hero.task.reopenedBy)?.name ?? "Someone"}</span> says this isn't quite done yet.
+              </span>
+            </div>
+          )}
+
+          {heroList.length > 0 && (
+            <button
+              type="button"
+              onClick={() => openList(hero.task.id)}
+              className="mt-4 flex w-full items-center gap-3 rounded-2xl border p-3 text-left transition-colors hover:border-primary/50 hover:bg-primary/5"
+            >
+              <ListChecks className="size-5 shrink-0 text-primary" />
+              <span className="min-w-0 flex-1">
+                <span className="block font-medium">Open the list</span>
+                <span className="block truncate text-sm text-muted-foreground">
+                  {heroList
+                    .filter((i) => !i.done)
+                    .slice(0, 4)
+                    .map((i) => i.text)
+                    .join(", ") || "Everything's checked off"}
+                </span>
+              </span>
+              <span className="text-sm text-muted-foreground tabular-nums">
+                {heroListLeft} of {heroList.length} left
+              </span>
+            </button>
+          )}
 
           {hero.task.resumeNote && (
             <div className="mt-4 flex gap-2 rounded-2xl bg-primary/8 p-3 text-sm">

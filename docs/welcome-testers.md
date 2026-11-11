@@ -19,6 +19,14 @@ starts ten things and finishes none.
 Open the invite link (or the app, then **Join my family** and type the code), install
 it to your home screen the same way, and pick your name.
 
+## Part of more than one family?
+
+Grown kids can be in their parents' household *and* their own. Tap the household
+name at the top of the app, then **Join another household** or **Create a new household**.
+Each household keeps its own lists, and you switch between them from that same menu.
+Your kids only see the households they join, so joining yours doesn't show them
+Grandma's.
+
 ## Things to try
 
 - **Now** tab: it shows just one thing to do. Try *Start*, *It's done*, and *Not this one*.

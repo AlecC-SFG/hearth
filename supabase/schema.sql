@@ -39,7 +39,7 @@ create index household_members_user_idx on public.household_members (user_id);
 -- Deletes are soft (deleted = true) so other phones learn about them.
 create table public.items (
   household_id uuid not null references public.households (id) on delete cascade,
-  kind text not null check (kind in ('member', 'project', 'task', 'history')),
+  kind text not null check (kind in ('member', 'project', 'task', 'history', 'listitem')),
   id text not null check (char_length(id) <= 120),
   data jsonb,
   deleted boolean not null default false,

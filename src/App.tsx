@@ -11,15 +11,17 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
-import { formatCode, SyncBadge, WhoAreYou } from "@/components/household"
+import { formatCode, HouseholdSwitcher, SyncBadge, WhoAreYou } from "@/components/household"
 import { feedbackAvailable, openFeedback } from "@/lib/feedback"
 import { syncAvailable } from "@/lib/supabase"
-import { joinHousehold, startSync } from "@/lib/sync"
+import { joinHousehold, refreshMemberships } from "@/lib/households"
+import { startSync } from "@/lib/sync"
 import { Button } from "@/components/ui/button"
 import { Confetti } from "@/components/ui/confetti"
 import { Toaster } from "@/components/ui/sonner"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { MemberAvatar } from "@/components/bits"
+import { ChecklistSheet } from "@/components/checklist"
 import { CommandPalette } from "@/components/command-palette"
 import { FocusOverlay } from "@/components/focus-overlay"
 import { HearthLogo } from "@/components/logo"
@@ -67,6 +69,7 @@ function Shell() {
   const setSettingsOpen = useUI((u) => u.setSettingsOpen)
   const projectFilter = useUI((u) => u.projectFilter)
   const me = useMe()
+  const households = useStore((s) => s.households)
   const ranked = useRanked()
   const myOpen = ranked.filter((s) => isMine(s.task, me?.id)).length
 
@@ -78,6 +81,7 @@ function Shell() {
           <HearthLogo />
           <span className="font-display text-xl font-semibold">Hearth</span>
         </div>
+        <HouseholdSwitcher className="mt-3 w-full justify-start bg-card ring-1 ring-border" />
         <Button className="mt-6 h-10 justify-start" onClick={() => newTask({ projectId: view === "tasks" ? projectFilter : undefined })}>
           <Plus /> New task
           <kbd className="ml-auto rounded bg-primary-foreground/20 px-1.5 text-[11px]">N</kbd>
@@ -137,7 +141,11 @@ function Shell() {
       {/* Mobile top bar */}
       <header className="safe-top sticky top-0 z-30 flex items-center gap-2 border-b bg-background/85 px-4 py-2.5 backdrop-blur-md md:hidden">
         <HearthLogo className="size-7" />
-        <span className="font-display text-lg font-semibold">Hearth</span>
+        {households.length > 0 && syncAvailable ? (
+          <HouseholdSwitcher className="-ml-1 max-w-[55vw]" />
+        ) : (
+          <span className="font-display text-lg font-semibold">Hearth</span>
+        )}
         <div className="ml-auto flex items-center gap-1">
           <span className="px-1">
             <SyncBadge compact />
@@ -207,6 +215,7 @@ function readJoinCode(): string | undefined {
 function JoinFromLink({ code, onDone }: { code: string; onDone(): void }) {
   const household = useStore((s) => s.household)
   const [busy, setBusy] = useState(false)
+  const known = useStore((s) => s.households.find((h) => h.joinCode === code))
   const already = household?.joinCode === code
   useEffect(() => {
     if (already) onDone()
@@ -216,11 +225,13 @@ function JoinFromLink({ code, onDone }: { code: string; onDone(): void }) {
     <AlertDialog open onOpenChange={(o) => !o && onDone()}>
       <AlertDialogContent>
         <AlertDialogHeader>
-          <AlertDialogTitle>Join household {formatCode(code)}?</AlertDialogTitle>
+          <AlertDialogTitle>{known ? `Switch to ${known.name}?` : `Join household ${formatCode(code)}?`}</AlertDialogTitle>
           <AlertDialogDescription>
             {household
-              ? `This phone will leave ${household.name} and load the new household's lists instead.`
-              : "This phone's current lists will be replaced by the household's. Save a backup first (Settings) if you want to keep them."}
+              ? known
+                ? "This phone is already part of it. Switch to its lists now?"
+                : `It will be added alongside ${household.name}. Nothing on this phone is replaced; switch between households from the menu at the top.`
+              : "It will be added to this phone. Your current lists stay here too, under \"This phone only\" in the household menu."}
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
@@ -253,7 +264,9 @@ export default function App() {
   const [joinCode, setJoinCode] = useState(readJoinCode)
 
   useEffect(() => {
-    if (hydrated) void startSync()
+    if (!hydrated) return
+    void startSync()
+    void refreshMemberships().catch(() => {})
   }, [hydrated, householdId])
 
   // An invite link opened on a brand-new phone is handled by onboarding; don't ask twice.
@@ -278,6 +291,7 @@ export default function App() {
           <WhoAreYou />
           {joinCode && <JoinFromLink code={joinCode} onDone={() => setJoinCode(undefined)} />}
           <TaskEditor />
+          <ChecklistSheet />
           <WipGuard />
           <SettingsDialog />
           <CommandPalette />

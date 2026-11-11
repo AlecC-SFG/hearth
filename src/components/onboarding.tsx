@@ -9,7 +9,7 @@ import { PRIVACY_NOTE } from "@/components/household"
 import { HearthLogo } from "@/components/logo"
 import { MEMBER_COLORS, MEMBER_EMOJI, useStore } from "@/lib/store"
 import { syncAvailable } from "@/lib/supabase"
-import { createHousehold, joinHousehold } from "@/lib/sync"
+import { createHousehold, joinHousehold } from "@/lib/households"
 
 type Path = "choose" | "setup" | "join"
 

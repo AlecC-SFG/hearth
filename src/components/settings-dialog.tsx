@@ -18,7 +18,7 @@ import { MemberAvatar, Segmented } from "@/components/bits"
 import { HouseholdSettings } from "@/components/household"
 import { useInstallPrompt } from "@/hooks/use-install"
 import { APP_VERSION, feedbackAvailable, openFeedback } from "@/lib/feedback"
-import { leaveHousehold } from "@/lib/sync"
+import { eraseThisPhone } from "@/lib/households"
 import { useStore } from "@/lib/store"
 import type { Settings } from "@/lib/types"
 import { useUI } from "@/lib/ui"
@@ -42,7 +42,7 @@ export function SettingsDialog() {
   const settings = useStore((s) => s.settings)
   const members = useStore((s) => s.members)
   const update = useStore((s) => s.updateSettings)
-  const { exportData, importData, resetAll } = useStore.getState()
+  const { exportData, importData } = useStore.getState()
   const fileRef = useRef<HTMLInputElement>(null)
   const [confirmReset, setConfirmReset] = useState(false)
   const install = useInstallPrompt()
@@ -191,8 +191,7 @@ export function SettingsDialog() {
             <AlertDialogAction
               variant="destructive"
               onClick={async () => {
-                await leaveHousehold().catch(() => {})
-                resetAll()
+                await eraseThisPhone().catch(() => useStore.getState().resetAll())
                 setConfirmReset(false)
                 setOpen(false)
               }}

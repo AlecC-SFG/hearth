@@ -50,6 +50,25 @@ export interface Task {
   updatedAt: string
   completedAt?: string
   completedBy?: string
+  /** How the task looked just before it was marked done, so "Not done yet" can restore it */
+  beforeDone?: { status: Status; progress: number; steps: Step[] }
+  /** For repeating tasks: the next occurrence created when this one was completed */
+  nextOccurrenceId?: string
+  /** Set when someone marks a completed task as not done */
+  reopenedBy?: string
+  reopenedAt?: string
+}
+
+/** One line on a list attached to a task (groceries, packing, supplies…). Synced on its own. */
+export interface ListItem {
+  id: string
+  taskId: string
+  text: string
+  done: boolean
+  order: number
+  addedBy?: string
+  doneBy?: string
+  createdAt: string
 }
 
 export interface FocusSession {

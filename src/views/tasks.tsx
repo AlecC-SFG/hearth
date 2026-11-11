@@ -1,5 +1,7 @@
 import { useMemo, useState, type ReactNode } from "react"
 import { ChevronDown, Info, Plus, RotateCcw, Search } from "lucide-react"
+import { formatDistanceToNow } from "date-fns"
+import { reopenWithToast } from "@/lib/actions"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
@@ -59,7 +61,6 @@ export function TasksView() {
   const tasks = useStore((s) => s.tasks)
   const members = useStore((s) => s.members)
   const projects = useStore((s) => s.projects)
-  const reopen = useStore((s) => s.reopenTask)
   const newTask = useUI((u) => u.newTask)
   const editTask = useUI((u) => u.editTask)
   const projectFilter = useUI((u) => u.projectFilter)
@@ -80,7 +81,7 @@ export function TasksView() {
   const blocked = list.filter((s) => s.blocked && s.task.status !== "parked")
   const parked = list.filter((s) => s.task.status === "parked")
   const done = tasks
-    .filter((t) => t.status === "done" && match(t))
+    .filter((t) => t.status === "done" && match(t) && Date.now() - new Date(t.completedAt ?? 0).getTime() < 14 * 86_400_000)
     .sort((a, b) => (b.completedAt ?? "").localeCompare(a.completedAt ?? ""))
     .slice(0, 20)
 
@@ -142,19 +143,26 @@ export function TasksView() {
           <Section title="Parked" count={parked.length} defaultOpen={false}>
             {parked.map((s) => <TaskRow key={s.task.id} s={s} />)}
           </Section>
-          <Section title="Done" count={done.length} defaultOpen={false}>
-            {done.map((t) => (
-              <div key={t.id} className="flex items-center gap-3 rounded-2xl border bg-card/60 p-3">
-                <CheckCircle done label={`Reopen ${t.title}`} onClick={() => reopen(t.id)} />
-                <button type="button" className="min-w-0 flex-1 truncate text-left text-muted-foreground line-through" onClick={() => editTask(t.id)}>
-                  {t.title}
-                </button>
-                <MemberAvatar member={members.find((m) => m.id === t.completedBy)} size="xs" />
-                <Button size="icon-sm" variant="ghost" aria-label="Reopen" onClick={() => reopen(t.id)}>
-                  <RotateCcw />
-                </Button>
-              </div>
-            ))}
+          <Section title="Recently done" count={done.length} defaultOpen={done.length <= 5} hint="tap “Not done yet” if it isn't">
+            {done.map((t) => {
+              const by = members.find((m) => m.id === t.completedBy)
+              return (
+                <div key={t.id} className="flex items-center gap-3 rounded-2xl border bg-card/60 p-3">
+                  <CheckCircle done label={`Mark ${t.title} not done`} onClick={() => reopenWithToast(t.id)} />
+                  <button type="button" className="min-w-0 flex-1 text-left" onClick={() => editTask(t.id)}>
+                    <span className="block truncate text-muted-foreground line-through">{t.title}</span>
+                    <span className="flex items-center gap-1 text-xs text-muted-foreground">
+                      {by && <MemberAvatar member={by} size="xs" />}
+                      {by ? `${by.name} · ` : ""}
+                      {t.completedAt ? formatDistanceToNow(new Date(t.completedAt), { addSuffix: true }) : ""}
+                    </span>
+                  </button>
+                  <Button size="sm" variant="outline" onClick={() => reopenWithToast(t.id)}>
+                    <RotateCcw /> Not done yet
+                  </Button>
+                </div>
+              )
+            })}
           </Section>
         </div>
       )}

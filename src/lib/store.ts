@@ -2,7 +2,7 @@ import { create } from "zustand"
 import { createJSONStorage, persist } from "zustand/middleware"
 import { addDays, addWeeks } from "date-fns"
 import { dayKey, storage, uid } from "./storage"
-import type { FocusSession, Member, Project, Settings, Task } from "./types"
+import type { FocusSession, ListItem, Member, Project, Settings, Task } from "./types"
 
 export const MEMBER_COLORS = ["#e8590c", "#7048e8", "#0c8599", "#d6336c", "#2f9e44", "#1c7ed6", "#f08c00", "#5f3dc4"]
 export const MEMBER_EMOJI = ["🦊", "🦉", "🐢", "🐝", "🐙", "🦋", "🐻", "🐧"]
@@ -15,12 +15,18 @@ interface State {
   members: Member[]
   projects: Project[]
   tasks: Task[]
+  /** Items on lists attached to tasks */
+  listItems: ListItem[]
   settings: Settings
   focus?: FocusSession
   /** yyyy-mm-dd → count of completions, per member */
   history: Record<string, Record<string, number>>
-  /** Set when this device is part of a synced household */
+  /** The household currently shown on this phone (undefined = this phone only) */
   household?: Household
+  /** Every household this phone belongs to; each one's lists are kept separately */
+  households: Household[]
+  /** True when there is a "this phone only" list set aside while viewing a household */
+  hasLocalSpace: boolean
 }
 
 export interface Household {
@@ -45,7 +51,13 @@ interface Actions {
   setStatus(id: string, status: Task["status"]): void
   /** Returns the id of the next occurrence for recurring tasks */
   completeTask(id: string, memberId?: string): string | undefined
-  reopenTask(id: string): void
+  /** Put a completed task back. undo = quietly reverse a mis-tap (no "reopened by" tag). */
+  reopenTask(id: string, opts?: { undo?: boolean }): void
+  addListItem(taskId: string, text: string): string
+  updateListItem(id: string, patch: Partial<ListItem>): void
+  removeListItem(id: string): ListItem | undefined
+  clearCheckedItems(taskId: string): ListItem[]
+  restoreListItems(items: ListItem[]): void
   startFocus(taskId: string, memberId: string, minutes: number): void
   pauseFocus(): void
   resumeFocus(): void
@@ -73,13 +85,19 @@ const initial: State = {
   members: [],
   projects: [],
   tasks: [],
+  listItems: [],
   settings: defaultSettings,
   focus: undefined,
   history: {},
   household: undefined,
+  households: [],
+  hasLocalSpace: false,
 }
 
 const nowIso = () => new Date().toISOString()
+
+/** List items of deleted tasks, kept in memory so "Undo" can bring them back */
+const removedItems = new Map<string, ListItem[]>()
 
 export function makeTask(t: NewTask): Task {
   const ts = nowIso()
@@ -171,7 +189,10 @@ export const useStore = create<State & Actions>()(
       },
       removeTask(id) {
         const task = get().tasks.find((t) => t.id === id)
+        const items = get().listItems.filter((i) => i.taskId === id)
+        if (items.length) removedItems.set(id, items)
         set((s) => ({
+          listItems: items.length ? s.listItems.filter((i) => i.taskId !== id) : s.listItems,
           tasks: s.tasks
             .filter((t) => t.id !== id)
             .map((t) => (t.dependsOn.includes(id) ? { ...t, dependsOn: t.dependsOn.filter((d) => d !== id) } : t)),
@@ -180,7 +201,12 @@ export const useStore = create<State & Actions>()(
         return task
       },
       restoreTask(task) {
-        set((s) => ({ tasks: [task, ...s.tasks.filter((t) => t.id !== task.id)] }))
+        const items = removedItems.get(task.id) ?? []
+        removedItems.delete(task.id)
+        set((s) => ({
+          tasks: [task, ...s.tasks.filter((t) => t.id !== task.id)],
+          listItems: items.length ? [...s.listItems.filter((i) => i.taskId !== task.id), ...items] : s.listItems,
+        }))
       },
       toggleStep(taskId, stepId) {
         const t = get().tasks.find((x) => x.id === taskId)
@@ -199,6 +225,7 @@ export const useStore = create<State & Actions>()(
         const day = dayKey()
         const who = memberId ?? get().settings.currentMemberId ?? "anon"
         const extra: Task[] = []
+        const carried: ListItem[] = []
         if (t.recurrence !== "none") {
           const base = t.dueAt ? new Date(t.dueAt) : new Date()
           const next = t.recurrence === "daily" ? addDays(base, 1) : addWeeks(base, 1)
@@ -215,8 +242,16 @@ export const useStore = create<State & Actions>()(
               resumeNote: undefined,
               completedAt: undefined,
               completedBy: undefined,
+              beforeDone: undefined,
+              nextOccurrenceId: undefined,
+              reopenedBy: undefined,
+              reopenedAt: undefined,
             }),
           )
+          // Anything not checked off this time stays on the next occurrence's list
+          for (const i of get().listItems.filter((x) => x.taskId === id && !x.done)) {
+            carried.push({ ...i, id: uid(), taskId: extra[0].id, createdAt: nowIso() })
+          }
         }
         set((s) => ({
           tasks: [
@@ -228,6 +263,10 @@ export const useStore = create<State & Actions>()(
                     status: "done" as const,
                     progress: 100,
                     steps: x.steps.map((st) => ({ ...st, done: true })),
+                    beforeDone: { status: x.status, progress: x.progress, steps: x.steps },
+                    nextOccurrenceId: extra[0]?.id,
+                    reopenedBy: undefined,
+                    reopenedAt: undefined,
                     completedAt: nowIso(),
                     completedBy: who,
                     updatedAt: nowIso(),
@@ -239,12 +278,92 @@ export const useStore = create<State & Actions>()(
             ...s.history,
             [day]: { ...s.history[day], [who]: (s.history[day]?.[who] ?? 0) + 1 },
           },
+          listItems: carried.length ? [...s.listItems, ...carried] : s.listItems,
           focus: s.focus?.taskId === id ? undefined : s.focus,
         }))
         return extra[0]?.id
       },
-      reopenTask(id) {
-        get().updateTask(id, { status: "todo", completedAt: undefined, completedBy: undefined })
+      reopenTask(id, opts) {
+        const t = get().tasks.find((x) => x.id === id)
+        if (!t || t.status !== "done") return
+        const me = get().settings.currentMemberId
+        // Take back the "done" count from the day and person it was credited to
+        const day = t.completedAt ? dayKey(new Date(t.completedAt)) : undefined
+        const who = t.completedBy
+        // Remove the next occurrence of a repeating task, unless someone already started it
+        const next = t.nextOccurrenceId ? get().tasks.find((x) => x.id === t.nextOccurrenceId) : undefined
+        const dropNext =
+          !!next && next.status === "todo" && next.timeSpentMin === 0 && !next.steps.some((st) => st.done) && next.progress === 0
+        const before = t.beforeDone
+        set((s) => {
+          const history = { ...s.history }
+          if (day && who && history[day]?.[who]) {
+            const dayMap = { ...history[day] }
+            dayMap[who] = Math.max(0, dayMap[who] - 1)
+            if (!dayMap[who]) delete dayMap[who]
+            history[day] = dayMap
+          }
+          return {
+            history,
+            tasks: s.tasks
+              .filter((x) => !(dropNext && x.id === next!.id))
+              .map((x) =>
+                x.id === id
+                  ? {
+                      ...x,
+                      status: before && before.status !== "done" ? before.status : "todo",
+                      progress: before?.progress ?? 0,
+                      steps: before?.steps ?? x.steps.map((st) => ({ ...st, done: false })),
+                      beforeDone: undefined,
+                      nextOccurrenceId: undefined,
+                      completedAt: undefined,
+                      completedBy: undefined,
+                      reopenedBy: opts?.undo ? undefined : me,
+                      reopenedAt: opts?.undo ? undefined : nowIso(),
+                      updatedAt: nowIso(),
+                    }
+                  : x,
+              ),
+            listItems: dropNext ? s.listItems.filter((i) => i.taskId !== next!.id) : s.listItems,
+          }
+        })
+      },
+
+      addListItem(taskId, text) {
+        const id = uid()
+        set((s) => {
+          const order = Math.max(0, ...s.listItems.filter((i) => i.taskId === taskId).map((i) => i.order)) + 1
+          return {
+            listItems: [
+              ...s.listItems,
+              { id, taskId, text, done: false, order, addedBy: s.settings.currentMemberId, createdAt: nowIso() },
+            ],
+          }
+        })
+        return id
+      },
+      updateListItem(id, patch) {
+        set((s) => ({
+          listItems: s.listItems.map((i) =>
+            i.id === id
+              ? { ...i, ...patch, ...(patch.done !== undefined ? { doneBy: patch.done ? s.settings.currentMemberId : undefined } : {}) }
+              : i,
+          ),
+        }))
+      },
+      removeListItem(id) {
+        const item = get().listItems.find((i) => i.id === id)
+        set((s) => ({ listItems: s.listItems.filter((i) => i.id !== id) }))
+        return item
+      },
+      clearCheckedItems(taskId) {
+        const gone = get().listItems.filter((i) => i.taskId === taskId && i.done)
+        set((s) => ({ listItems: s.listItems.filter((i) => !(i.taskId === taskId && i.done)) }))
+        return gone
+      },
+      restoreListItems(items) {
+        const ids = new Set(items.map((i) => i.id))
+        set((s) => ({ listItems: [...s.listItems.filter((i) => !ids.has(i.id)), ...items] }))
       },
 
       startFocus(taskId, memberId, minutes) {
@@ -287,8 +406,8 @@ export const useStore = create<State & Actions>()(
         set((s) => ({ settings: { ...s.settings, ...patch } }))
       },
       exportData() {
-        const { members, projects, tasks, settings, history } = get()
-        return JSON.stringify({ app: "hearth", version: 1, exportedAt: nowIso(), members, projects, tasks, settings, history }, null, 2)
+        const { members, projects, tasks, listItems, settings, history } = get()
+        return JSON.stringify({ app: "hearth", version: 2, exportedAt: nowIso(), members, projects, tasks, listItems, settings, history }, null, 2)
       },
       importData(json) {
         const d = JSON.parse(json)
@@ -298,6 +417,7 @@ export const useStore = create<State & Actions>()(
           members: d.members ?? [],
           projects: d.projects ?? [],
           tasks: d.tasks,
+          listItems: d.listItems ?? [],
           settings: { ...defaultSettings, ...d.settings },
           history: d.history ?? {},
           focus: undefined,
@@ -307,11 +427,24 @@ export const useStore = create<State & Actions>()(
         set({ ...initial, hydrated: true })
       },
       setHousehold(household) {
-        set({ household })
+        set((s) => ({
+          household,
+          // Keep the list entry in step (renames, new join codes)
+          households: household ? s.households.map((h) => (h.id === household.id ? household : h)) : s.households,
+        }))
       },
     }),
     {
       name: "hearth-v1",
+      version: 2,
+      migrate: (persisted, version) => {
+        const st = persisted as Partial<State>
+        if (version < 2) {
+          st.households = st.household ? [st.household] : []
+          st.hasLocalSpace = false
+        }
+        return st as State & Actions
+      },
       storage: createJSONStorage(() => storage),
       partialize: ({ hydrated: _h, ...rest }) => rest,
       onRehydrateStorage: () => () => useStore.setState({ hydrated: true }),

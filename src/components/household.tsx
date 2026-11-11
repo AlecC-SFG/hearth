@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react"
 import QRCode from "qrcode"
-import { Check, Cloud, CloudOff, Copy, Loader2, LogOut, RefreshCw, Share2, UserPlus, Users } from "lucide-react"
+import { Check, ChevronsUpDown, Cloud, CloudOff, Copy, Home, Loader2, LogOut, Plus, RefreshCw, Share2, Smartphone, UserPlus, Users } from "lucide-react"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -14,11 +14,21 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuGroup,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 import { ResponsiveModal } from "@/components/responsive-modal"
 import { MemberAvatar } from "@/components/bits"
 import { MEMBER_COLORS, MEMBER_EMOJI, useStore } from "@/lib/store"
 import { syncAvailable } from "@/lib/supabase"
-import { createHousehold, joinHousehold, joinLink, leaveHousehold, newJoinCode, useSync } from "@/lib/sync"
+import { createHousehold, joinHousehold, joinLink, leaveHousehold, LOCAL, newJoinCode, switchHousehold } from "@/lib/households"
+import { useSync } from "@/lib/sync"
 import { cn } from "@/lib/utils"
 
 export const PRIVACY_NOTE =
@@ -71,19 +81,13 @@ export function SyncBadge({ compact }: { compact?: boolean }) {
   )
 }
 
-/** The household section inside Settings. */
-export function HouseholdSettings() {
-  const household = useStore((s) => s.household)
-  const hasData = useStore((s) => s.tasks.length + s.projects.length > 0)
-  const { status, error } = useSync()
-  const [mode, setMode] = useState<"idle" | "create" | "join">("idle")
+/** Create-or-join forms, used in Settings and in the household switcher. */
+export function HouseholdForms({ initialMode = "idle", onDone, compact }: { initialMode?: "idle" | "create" | "join"; onDone?(): void; compact?: boolean }) {
+  const inHousehold = useStore((s) => !!s.household)
+  const [mode, setMode] = useState(initialMode)
   const [name, setName] = useState("")
   const [code, setCode] = useState("")
   const [busy, setBusy] = useState(false)
-  const [confirmJoin, setConfirmJoin] = useState(false)
-  const [confirmLeave, setConfirmLeave] = useState(false)
-
-  if (!syncAvailable) return null
 
   const run = async (fn: () => Promise<unknown>, ok: string) => {
     setBusy(true)
@@ -91,103 +95,26 @@ export function HouseholdSettings() {
       await fn()
       toast.success(ok)
       setMode("idle")
+      setName("")
+      setCode("")
+      onDone?.()
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Something went wrong")
     } finally {
       setBusy(false)
     }
   }
-
-  if (household) {
-    const link = joinLink(household.joinCode)
-    const share = async () => {
-      const text = `Join our family on Hearth: open this link on your phone, or enter code ${formatCode(household.joinCode)}.`
-      try {
-        if (navigator.share) await navigator.share({ title: "Join our household on Hearth", text, url: link })
-        else {
-          await navigator.clipboard.writeText(`${text}\n${link}`)
-          toast.success("Invite copied", { description: "Paste it into a text message." })
-        }
-      } catch {
-        /* user cancelled */
-      }
-    }
-    return (
-      <div className="space-y-4 rounded-2xl border p-4">
-        <div className="flex items-start justify-between gap-3">
-          <div>
-            <div className="text-xs text-muted-foreground">Household</div>
-            <div className="font-display text-xl font-semibold">{household.name}</div>
-          </div>
-          <SyncBadge />
-        </div>
-        {status === "error" && error && <p className="rounded-xl bg-hot/10 p-2.5 text-sm text-hot">{error}</p>}
-        <div className="flex flex-col items-center gap-3 sm:flex-row sm:items-start">
-          <JoinQR code={household.joinCode} className="w-40 shrink-0" />
-          <div className="w-full space-y-2 text-sm">
-            <p className="text-muted-foreground">Add someone: they scan this with their phone camera, or open Hearth and enter the code.</p>
-            <div className="rounded-xl bg-muted px-3 py-2 text-center font-mono text-2xl font-semibold tracking-widest">{formatCode(household.joinCode)}</div>
-            <div className="flex flex-wrap gap-2">
-              <Button size="sm" onClick={share}>
-                <Share2 /> Send invite
-              </Button>
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={async () => {
-                  await navigator.clipboard?.writeText(link).catch(() => {})
-                  toast.success("Link copied")
-                }}
-              >
-                <Copy /> Copy link
-              </Button>
-              <Button size="sm" variant="ghost" disabled={busy} onClick={() => run(newJoinCode, "New code made. The old one no longer works.")}>
-                <RefreshCw /> New code
-              </Button>
-            </div>
-          </div>
-        </div>
-        <Button variant="ghost" size="sm" className="text-muted-foreground" onClick={() => setConfirmLeave(true)}>
-          <LogOut /> Stop syncing this phone
-        </Button>
-        <AlertDialog open={confirmLeave} onOpenChange={setConfirmLeave}>
-          <AlertDialogContent>
-            <AlertDialogHeader>
-              <AlertDialogTitle>Stop syncing this phone?</AlertDialogTitle>
-              <AlertDialogDescription>
-                This phone keeps its current lists but stops sharing with {household.name}. Everyone else keeps syncing. You can rejoin with the code.
-              </AlertDialogDescription>
-            </AlertDialogHeader>
-            <AlertDialogFooter>
-              <AlertDialogCancel>Cancel</AlertDialogCancel>
-              <AlertDialogAction
-                onClick={() => {
-                  setConfirmLeave(false)
-                  void run(leaveHousehold, "This phone stopped syncing")
-                }}
-              >
-                Stop syncing
-              </AlertDialogAction>
-            </AlertDialogFooter>
-          </AlertDialogContent>
-        </AlertDialog>
-      </div>
-    )
-  }
+  const cancel = () => (initialMode === "idle" ? setMode("idle") : onDone?.())
 
   return (
-    <div className="space-y-3 rounded-2xl border p-4">
-      <div>
-        <div className="font-medium">Share lists across your family's phones</div>
-        <p className="text-sm text-muted-foreground">Create a household, then invite everyone with a code. Other households can't see yours.</p>
-      </div>
+    <div className="space-y-3">
       {mode === "idle" && (
         <div className="flex flex-wrap gap-2">
-          <Button onClick={() => setMode("create")}>
-            <Users /> Create a household
+          <Button size={compact ? "sm" : "default"} onClick={() => setMode("create")}>
+            <Users /> {inHousehold ? "Create another household" : "Create a household"}
           </Button>
-          <Button variant="outline" onClick={() => setMode("join")}>
-            <UserPlus /> Join with a code
+          <Button size={compact ? "sm" : "default"} variant="outline" onClick={() => setMode("join")}>
+            <UserPlus /> {inHousehold ? "Join another" : "Join with a code"}
           </Button>
         </div>
       )}
@@ -200,12 +127,16 @@ export function HouseholdSettings() {
           }}
         >
           <Input autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder="Household name, e.g. The Smiths" className="h-10 rounded-xl" />
-          <p className="text-xs text-muted-foreground">Everything on this phone becomes the household's starting list.</p>
+          <p className="text-xs text-muted-foreground">
+            {inHousehold
+              ? "It starts with just you. Your other households aren't affected."
+              : "Everything on this phone becomes the household's starting list."}
+          </p>
           <div className="flex gap-2">
             <Button type="submit" disabled={busy || !name.trim()}>
               {busy ? <Loader2 className="animate-spin" /> : <Check />} Create
             </Button>
-            <Button type="button" variant="ghost" onClick={() => setMode("idle")}>
+            <Button type="button" variant="ghost" onClick={cancel}>
               Cancel
             </Button>
           </div>
@@ -216,9 +147,7 @@ export function HouseholdSettings() {
           className="space-y-2"
           onSubmit={(e) => {
             e.preventDefault()
-            if (!code.trim()) return
-            if (hasData) setConfirmJoin(true)
-            else void run(() => joinHousehold(code), "Joined! Your family's lists are loading.")
+            if (code.trim()) void run(() => joinHousehold(code), "Joined! Their lists are loading.")
           }}
         >
           <Input
@@ -228,36 +157,144 @@ export function HouseholdSettings() {
             placeholder="ABCD-2345"
             autoCapitalize="characters"
             autoComplete="off"
+            aria-label="Household code"
             className="h-12 rounded-xl text-center font-mono text-xl tracking-widest md:text-xl"
           />
+          {inHousehold && (
+            <p className="text-xs text-muted-foreground">Your other households stay on this phone. Switch between them from the menu at the top.</p>
+          )}
           <div className="flex gap-2">
             <Button type="submit" disabled={busy || code.replace(/[^A-Z0-9]/gi, "").length < 8}>
               {busy ? <Loader2 className="animate-spin" /> : <Check />} Join
             </Button>
-            <Button type="button" variant="ghost" onClick={() => setMode("idle")}>
+            <Button type="button" variant="ghost" onClick={cancel}>
               Cancel
             </Button>
           </div>
         </form>
       )}
-      <p className="text-xs text-muted-foreground">{PRIVACY_NOTE}</p>
-      <AlertDialog open={confirmJoin} onOpenChange={setConfirmJoin}>
+    </div>
+  )
+}
+
+/** The household section inside Settings. */
+export function HouseholdSettings() {
+  const household = useStore((s) => s.household)
+  const households = useStore((s) => s.households)
+  const others = households.filter((h) => h.id !== household?.id)
+  const { status, error } = useSync()
+  const [busy, setBusy] = useState(false)
+  const [confirmLeave, setConfirmLeave] = useState(false)
+
+  if (!syncAvailable) return null
+
+  if (!household) {
+    return (
+      <div className="space-y-3 rounded-2xl border p-4">
+        <div>
+          <div className="font-medium">Share lists across your family's phones</div>
+          <p className="text-sm text-muted-foreground">Create a household, then invite everyone with a code. Other households can't see yours.</p>
+        </div>
+        <HouseholdForms />
+        <p className="text-xs text-muted-foreground">{PRIVACY_NOTE}</p>
+      </div>
+    )
+  }
+
+  const link = joinLink(household.joinCode)
+  const share = async () => {
+    const text = `Join ${household.name} on Hearth: open this link on your phone, or enter code ${formatCode(household.joinCode)}.`
+    try {
+      if (navigator.share) await navigator.share({ title: `Join ${household.name} on Hearth`, text, url: link })
+      else {
+        await navigator.clipboard.writeText(`${text}\n${link}`)
+        toast.success("Invite copied", { description: "Paste it into a text message." })
+      }
+    } catch {
+      /* user cancelled */
+    }
+  }
+  const rotate = async () => {
+    setBusy(true)
+    try {
+      await newJoinCode()
+      toast.success("New code made. The old one no longer works.")
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Something went wrong")
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className="space-y-4 rounded-2xl border p-4">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="text-xs text-muted-foreground">Household</div>
+          <div className="font-display text-xl font-semibold">{household.name}</div>
+          {others.length > 0 && <div className="text-xs text-muted-foreground">Also on this phone: {others.map((h) => h.name).join(", ")}</div>}
+        </div>
+        <SyncBadge />
+      </div>
+      {status === "error" && error && <p className="rounded-xl bg-hot/10 p-2.5 text-sm text-hot">{error}</p>}
+      <div className="flex flex-col items-center gap-3 sm:flex-row sm:items-start">
+        <JoinQR code={household.joinCode} className="w-40 shrink-0" />
+        <div className="w-full space-y-2 text-sm">
+          <p className="text-muted-foreground">Add someone to {household.name}: they scan this with their phone camera, or open Hearth and enter the code.</p>
+          <div className="rounded-xl bg-muted px-3 py-2 text-center font-mono text-2xl font-semibold tracking-widest">{formatCode(household.joinCode)}</div>
+          <div className="flex flex-wrap gap-2">
+            <Button size="sm" onClick={share}>
+              <Share2 /> Send invite
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={async () => {
+                await navigator.clipboard?.writeText(link).catch(() => {})
+                toast.success("Link copied")
+              }}
+            >
+              <Copy /> Copy link
+            </Button>
+            <Button size="sm" variant="ghost" disabled={busy} onClick={rotate}>
+              <RefreshCw /> New code
+            </Button>
+          </div>
+        </div>
+      </div>
+      <div className="space-y-2 border-t pt-3">
+        <div className="text-sm font-medium">Other households</div>
+        <p className="text-xs text-muted-foreground">
+          You can belong to more than one, like your own family and your parents'. Each keeps its own lists. Switch between them from the menu at the top.
+        </p>
+        <HouseholdForms compact />
+      </div>
+      <Button variant="ghost" size="sm" className="text-muted-foreground" onClick={() => setConfirmLeave(true)}>
+        <LogOut /> Remove {household.name} from this phone
+      </Button>
+      <AlertDialog open={confirmLeave} onOpenChange={setConfirmLeave}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Replace this phone's lists?</AlertDialogTitle>
+            <AlertDialogTitle>Remove {household.name} from this phone?</AlertDialogTitle>
             <AlertDialogDescription>
-              Joining loads the household's lists in place of what's on this phone now. Save a backup first if you want to keep them.
+              This phone stops syncing with {household.name}, and its lists are removed from this phone. Everyone else in the household keeps
+              everything. You can rejoin later with the code.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
             <AlertDialogAction
-              onClick={() => {
-                setConfirmJoin(false)
-                void run(() => joinHousehold(code), "Joined! Your family's lists are loading.")
+              onClick={async () => {
+                setConfirmLeave(false)
+                try {
+                  await leaveHousehold()
+                  toast.success(`${household.name} removed from this phone`)
+                } catch (e) {
+                  toast.error(e instanceof Error ? e.message : "Something went wrong")
+                }
               }}
             >
-              Join and replace
+              Remove
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -328,5 +365,81 @@ export function WhoAreYou() {
         </div>
       )}
     </ResponsiveModal>
+  )
+}
+
+/** Menu at the top of the app for moving between households on this phone. */
+export function HouseholdSwitcher({ className }: { className?: string }) {
+  const household = useStore((s) => s.household)
+  const households = useStore((s) => s.households)
+  const hasLocalSpace = useStore((s) => s.hasLocalSpace)
+  const [dialog, setDialog] = useState<"create" | "join" | null>(null)
+
+  if (!syncAvailable || households.length === 0) return null
+  const showLocal = hasLocalSpace || !household
+
+  const go = async (id: string, label: string) => {
+    try {
+      await switchHousehold(id)
+      toast(`Switched to ${label}`)
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Couldn't switch")
+    }
+  }
+
+  return (
+    <>
+      <DropdownMenu>
+        <DropdownMenuTrigger
+          className={cn(
+            "flex h-9 min-w-0 items-center gap-1.5 rounded-xl px-2.5 text-sm font-medium outline-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring",
+            className,
+          )}
+          aria-label="Switch household"
+        >
+          <Home className="size-4 shrink-0 text-primary" />
+          <span className="truncate">{household?.name ?? "This phone only"}</span>
+          <ChevronsUpDown className="size-3.5 shrink-0 text-muted-foreground" />
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="start" className="min-w-60">
+          <DropdownMenuGroup>
+            <DropdownMenuLabel>Your households</DropdownMenuLabel>
+            {households.map((h) => (
+              <DropdownMenuItem key={h.id} onClick={() => go(h.id, h.name)}>
+                <Home />
+                <span className="flex-1 truncate">{h.name}</span>
+                {household?.id === h.id && <Check className="text-primary" />}
+              </DropdownMenuItem>
+            ))}
+            {showLocal && (
+              <DropdownMenuItem onClick={() => go(LOCAL, "this phone only")}>
+                <Smartphone />
+                <span className="flex-1">This phone only</span>
+                {!household && <Check className="text-primary" />}
+              </DropdownMenuItem>
+            )}
+          </DropdownMenuGroup>
+          <DropdownMenuSeparator />
+          <DropdownMenuItem onClick={() => setDialog("join")}>
+            <UserPlus /> Join another household…
+          </DropdownMenuItem>
+          <DropdownMenuItem onClick={() => setDialog("create")}>
+            <Plus /> Create a new household…
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+      <ResponsiveModal
+        open={!!dialog}
+        onOpenChange={(o) => !o && setDialog(null)}
+        title={dialog === "join" ? "Join another household" : "Create a new household"}
+        description={
+          dialog === "join"
+            ? "Enter the code someone in that household gave you. Your current households stay on this phone."
+            : "It starts with just you. Invite others from Settings afterwards."
+        }
+      >
+        {dialog && <HouseholdForms key={dialog} initialMode={dialog} onDone={() => setDialog(null)} />}
+      </ResponsiveModal>
+    </>
   )
 }
