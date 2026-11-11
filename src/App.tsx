@@ -13,6 +13,7 @@ import {
 } from "@/components/ui/alert-dialog"
 import { formatCode, HouseholdSwitcher, SyncBadge, WhoAreYou } from "@/components/household"
 import { feedbackAvailable, openFeedback } from "@/lib/feedback"
+import { announceUpdate } from "@/lib/pwa"
 import { syncAvailable } from "@/lib/supabase"
 import { joinHousehold, refreshMemberships } from "@/lib/households"
 import { startSync } from "@/lib/sync"
@@ -262,6 +263,10 @@ export default function App() {
   const onboarded = useStore((s) => s.onboarded)
   const householdId = useStore((s) => s.household?.id)
   const [joinCode, setJoinCode] = useState(readJoinCode)
+
+  useEffect(() => {
+    if (hydrated) announceUpdate()
+  }, [hydrated])
 
   useEffect(() => {
     if (!hydrated) return

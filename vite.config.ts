@@ -29,6 +29,8 @@ export default defineConfig({
     tailwindcss(),
     VitePWA({
       registerType: 'autoUpdate',
+      // Registered by src/lib/pwa.ts so the app can announce updates
+      injectRegister: false,
       includeAssets: ['favicon.ico', 'favicon.svg', 'apple-touch-icon-180x180.png'],
       manifest: {
         name: 'Hearth: family tasks',
@@ -48,7 +50,13 @@ export default defineConfig({
           { src: 'maskable-icon-512x512.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' },
         ],
       },
-      workbox: { globPatterns: ['**/*.{js,css,html,svg,png,ico,woff2}'] },
+      workbox: {
+        globPatterns: ['**/*.{js,css,html,svg,png,ico,woff2}'],
+        // New versions take over right away (src/lib/pwa.ts then offers a reload).
+        // Must stay on: phones on 0.3.1 and earlier rely on it to update at all.
+        skipWaiting: true,
+        clientsClaim: true,
+      },
     }),
   ],
   resolve: { alias: { '@': path.resolve(__dirname, './src') } },
