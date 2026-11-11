@@ -12,16 +12,18 @@ interface Props {
   children: ReactNode
   footer?: ReactNode
   className?: string
+  /** false = must be answered (no close button, no swipe-down) */
+  dismissible?: boolean
 }
 
 /** Centered dialog on desktop, Vaul bottom sheet on phones. */
-export function ResponsiveModal({ open, onOpenChange, title, description, children, footer, className }: Props) {
+export function ResponsiveModal({ open, onOpenChange, title, description, children, footer, className, dismissible = true }: Props) {
   const desktop = useIsDesktop()
 
   if (desktop) {
     return (
       <Dialog open={open} onOpenChange={onOpenChange}>
-        <DialogContent className={cn("flex max-h-[88dvh] flex-col gap-0 p-0 sm:max-w-lg", className)}>
+        <DialogContent showCloseButton={dismissible} className={cn("flex max-h-[88dvh] flex-col gap-0 p-0 sm:max-w-lg", className)}>
           <DialogHeader className="border-b px-5 pt-5 pb-4">
             <DialogTitle className="font-display text-xl">{title}</DialogTitle>
             {description && <DialogDescription>{description}</DialogDescription>}
@@ -34,7 +36,7 @@ export function ResponsiveModal({ open, onOpenChange, title, description, childr
   }
 
   return (
-    <Drawer.Root open={open} onOpenChange={onOpenChange} repositionInputs={false}>
+    <Drawer.Root open={open} onOpenChange={onOpenChange} repositionInputs={false} dismissible={dismissible}>
       <Drawer.Portal>
         <Drawer.Overlay className="fixed inset-0 z-50 bg-black/40 backdrop-blur-[2px]" />
         <Drawer.Content

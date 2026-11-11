@@ -1,5 +1,5 @@
 import { useRef, useState, type ReactNode } from "react"
-import { Download, Share, Smartphone, Upload } from "lucide-react"
+import { Download, MessageSquareHeart, Share, Smartphone, Upload } from "lucide-react"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import { Switch } from "@/components/ui/switch"
@@ -15,7 +15,10 @@ import {
 } from "@/components/ui/alert-dialog"
 import { ResponsiveModal } from "@/components/responsive-modal"
 import { MemberAvatar, Segmented } from "@/components/bits"
+import { HouseholdSettings } from "@/components/household"
 import { useInstallPrompt } from "@/hooks/use-install"
+import { APP_VERSION, feedbackAvailable, openFeedback } from "@/lib/feedback"
+import { leaveHousehold } from "@/lib/sync"
 import { useStore } from "@/lib/store"
 import type { Settings } from "@/lib/types"
 import { useUI } from "@/lib/ui"
@@ -78,6 +81,8 @@ export function SettingsDialog() {
     <>
       <ResponsiveModal open={open} onOpenChange={setOpen} title="Settings">
         <div className="space-y-6">
+          <HouseholdSettings />
+
           <Row label="Who's using this device?">
             <div className="flex flex-wrap gap-2">
               {members.map((m) => (
@@ -156,9 +161,20 @@ export function SettingsDialog() {
             </div>
           </Row>
 
-          <Button variant="ghost" className="text-destructive" onClick={() => setConfirmReset(true)}>
-            Erase everything & start over
-          </Button>
+          {feedbackAvailable && (
+            <Row label="Help make Hearth better" hint="Found a bug or have an idea? It takes a minute.">
+              <Button variant="outline" onClick={openFeedback}>
+                <MessageSquareHeart /> Send feedback
+              </Button>
+            </Row>
+          )}
+
+          <div className="flex items-center justify-between gap-2">
+            <Button variant="ghost" className="text-destructive" onClick={() => setConfirmReset(true)}>
+              Erase this phone & start over
+            </Button>
+            <span className="text-xs text-muted-foreground tabular-nums">Hearth {APP_VERSION}</span>
+          </div>
         </div>
       </ResponsiveModal>
 
@@ -167,14 +183,15 @@ export function SettingsDialog() {
           <AlertDialogHeader>
             <AlertDialogTitle>Erase everything?</AlertDialogTitle>
             <AlertDialogDescription>
-              This deletes all people, projects and tasks on this device. It can't be undone unless you have a backup.
+              This deletes all people, projects and tasks on this phone and stops it syncing. Other phones in your household keep their lists. It can't be undone unless you have a backup.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
             <AlertDialogAction
               variant="destructive"
-              onClick={() => {
+              onClick={async () => {
+                await leaveHousehold().catch(() => {})
                 resetAll()
                 setConfirmReset(false)
                 setOpen(false)

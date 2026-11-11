@@ -19,6 +19,14 @@ interface State {
   focus?: FocusSession
   /** yyyy-mm-dd → count of completions, per member */
   history: Record<string, Record<string, number>>
+  /** Set when this device is part of a synced household */
+  household?: Household
+}
+
+export interface Household {
+  id: string
+  name: string
+  joinCode: string
 }
 
 interface Actions {
@@ -47,6 +55,7 @@ interface Actions {
   importData(json: string): void
   exportData(): string
   resetAll(): void
+  setHousehold(h?: Household): void
 }
 
 const defaultSettings: Settings = {
@@ -67,6 +76,7 @@ const initial: State = {
   settings: defaultSettings,
   focus: undefined,
   history: {},
+  household: undefined,
 }
 
 const nowIso = () => new Date().toISOString()
@@ -295,6 +305,9 @@ export const useStore = create<State & Actions>()(
       },
       resetAll() {
         set({ ...initial, hydrated: true })
+      },
+      setHousehold(household) {
+        set({ household })
       },
     }),
     {

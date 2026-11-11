@@ -1,5 +1,20 @@
-import { useEffect } from "react"
-import { Command, FolderKanban, Home, ListTodo, Plus, Settings, Users } from "lucide-react"
+import { useEffect, useState } from "react"
+import { Command, FolderKanban, Home, ListTodo, MessageSquareHeart, Plus, Settings, Users } from "lucide-react"
+import { toast } from "sonner"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
+import { formatCode, SyncBadge, WhoAreYou } from "@/components/household"
+import { feedbackAvailable, openFeedback } from "@/lib/feedback"
+import { syncAvailable } from "@/lib/supabase"
+import { joinHousehold, startSync } from "@/lib/sync"
 import { Button } from "@/components/ui/button"
 import { Confetti } from "@/components/ui/confetti"
 import { Toaster } from "@/components/ui/sonner"
@@ -93,7 +108,19 @@ function Shell() {
           <Command className="size-3.5" /> Quick actions
           <kbd className="ml-auto text-[11px]">Ctrl K</kbd>
         </button>
-        <div className="mt-auto flex items-center gap-2 rounded-xl p-2">
+        {feedbackAvailable && (
+          <button
+            type="button"
+            onClick={openFeedback}
+            className="mt-2 flex h-9 items-center gap-2 rounded-xl px-3 text-sm text-muted-foreground hover:bg-sidebar-accent/60"
+          >
+            <MessageSquareHeart className="size-4" /> Send feedback
+          </button>
+        )}
+        <div className="mt-auto px-3 pb-1">
+          <SyncBadge />
+        </div>
+        <div className="flex items-center gap-2 rounded-xl p-2">
           <MemberAvatar member={me} size="sm" />
           <div className="min-w-0 flex-1">
             <div className="truncate text-sm font-medium">{me?.name}</div>
@@ -112,6 +139,9 @@ function Shell() {
         <HearthLogo className="size-7" />
         <span className="font-display text-lg font-semibold">Hearth</span>
         <div className="ml-auto flex items-center gap-1">
+          <span className="px-1">
+            <SyncBadge compact />
+          </span>
           <Button size="icon" variant="ghost" aria-label="Quick actions" onClick={() => setPaletteOpen(true)}>
             <Command />
           </Button>
@@ -162,9 +192,76 @@ function Shell() {
   )
 }
 
+/** Read ?join=CODE once (from a scanned QR code or invite link), then tidy the URL. */
+function readJoinCode(): string | undefined {
+  try {
+    const code = new URLSearchParams(location.search).get("join")
+    if (code) history.replaceState(null, "", location.pathname)
+    return code ? code.toUpperCase() : undefined
+  } catch {
+    return undefined
+  }
+}
+
+/** Opened an invite link on a phone that already uses Hearth. */
+function JoinFromLink({ code, onDone }: { code: string; onDone(): void }) {
+  const household = useStore((s) => s.household)
+  const [busy, setBusy] = useState(false)
+  const already = household?.joinCode === code
+  useEffect(() => {
+    if (already) onDone()
+  }, [already, onDone])
+  if (already || !syncAvailable) return null
+  return (
+    <AlertDialog open onOpenChange={(o) => !o && onDone()}>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>Join household {formatCode(code)}?</AlertDialogTitle>
+          <AlertDialogDescription>
+            {household
+              ? `This phone will leave ${household.name} and load the new household's lists instead.`
+              : "This phone's current lists will be replaced by the household's. Save a backup first (Settings) if you want to keep them."}
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel disabled={busy}>Not now</AlertDialogCancel>
+          <AlertDialogAction
+            disabled={busy}
+            onClick={async () => {
+              setBusy(true)
+              try {
+                await joinHousehold(code)
+                toast.success("Joined! Your family's lists are loading.")
+              } catch (e) {
+                toast.error(e instanceof Error ? e.message : "Couldn't join")
+              }
+              onDone()
+            }}
+          >
+            Join
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+  )
+}
+
 export default function App() {
   const hydrated = useStore((s) => s.hydrated)
   const onboarded = useStore((s) => s.onboarded)
+  const householdId = useStore((s) => s.household?.id)
+  const [joinCode, setJoinCode] = useState(readJoinCode)
+
+  useEffect(() => {
+    if (hydrated) void startSync()
+  }, [hydrated, householdId])
+
+  // An invite link opened on a brand-new phone is handled by onboarding; don't ask twice.
+  const [seenOnboarded, setSeenOnboarded] = useState<boolean | undefined>(undefined)
+  if (hydrated && seenOnboarded !== onboarded) {
+    if (seenOnboarded === false && onboarded) setJoinCode(undefined)
+    setSeenOnboarded(onboarded)
+  }
 
   return (
     <TooltipProvider>
@@ -174,10 +271,12 @@ export default function App() {
           <HearthLogo className="size-12 animate-pulse" />
         </div>
       ) : !onboarded ? (
-        <Onboarding />
+        <Onboarding initialCode={joinCode} />
       ) : (
         <>
           <Shell />
+          <WhoAreYou />
+          {joinCode && <JoinFromLink code={joinCode} onDone={() => setJoinCode(undefined)} />}
           <TaskEditor />
           <WipGuard />
           <SettingsDialog />

@@ -1,9 +1,10 @@
 import { useEffect, useState } from "react"
-import { FolderKanban, Home, ListTodo, Play, Plus, Settings, Users } from "lucide-react"
+import { FolderKanban, Home, ListTodo, MessageSquareHeart, Play, Plus, Settings, Users } from "lucide-react"
 import { toast } from "sonner"
 import { CommandDialog, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList, CommandShortcut, Command } from "@/components/ui/command"
 import { useRanked } from "@/hooks/use-ranked"
 import { requestFocus } from "@/lib/actions"
+import { feedbackAvailable, openFeedback } from "@/lib/feedback"
 import { useStore } from "@/lib/store"
 import { useUI, type View } from "@/lib/ui"
 
@@ -106,6 +107,11 @@ export function CommandPalette() {
             <CommandItem value="go settings" onSelect={() => run(() => setSettingsOpen(true))}>
               <Settings /> Settings
             </CommandItem>
+            {feedbackAvailable && (
+              <CommandItem value="send feedback" onSelect={() => run(openFeedback)}>
+                <MessageSquareHeart /> Send feedback
+              </CommandItem>
+            )}
             <CommandItem value="new task" onSelect={() => run(() => newTask())}>
               <Plus /> New task
               <CommandShortcut>N</CommandShortcut>

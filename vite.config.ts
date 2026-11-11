@@ -1,3 +1,5 @@
+import { execSync } from 'node:child_process'
+import { readFileSync } from 'node:fs'
 import path from 'node:path'
 import tailwindcss from '@tailwindcss/vite'
 import react from '@vitejs/plugin-react'
@@ -6,8 +8,22 @@ import { VitePWA } from 'vite-plugin-pwa'
 
 const base = process.env.BASE_PATH ?? '/'
 
+function appVersion() {
+  const pkg = JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf8')) as { version: string }
+  let sha = process.env.GITHUB_SHA?.slice(0, 7)
+  if (!sha) {
+    try {
+      sha = execSync('git rev-parse --short HEAD').toString().trim()
+    } catch {
+      sha = 'local'
+    }
+  }
+  return `${pkg.version}+${sha}`
+}
+
 export default defineConfig({
   base,
+  define: { __APP_VERSION__: JSON.stringify(appVersion()) },
   plugins: [
     react(),
     tailwindcss(),
