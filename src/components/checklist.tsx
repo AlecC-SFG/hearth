@@ -60,6 +60,13 @@ function Row({ item }: { item: ListItem }) {
         value={item.text}
         onChange={(e) => update(item.id, { text: e.target.value })}
         onBlur={(e) => !e.target.value.trim() && remove(item.id)}
+        onKeyDown={(e) => {
+          // Enter just finishes editing; it must not submit the surrounding task form
+          if (e.key === "Enter") {
+            e.preventDefault()
+            e.currentTarget.blur()
+          }
+        }}
         aria-label="List item"
         className={cn("min-w-0 flex-1 bg-transparent py-2 text-base outline-none md:text-sm", item.done && "text-muted-foreground line-through")}
       />
@@ -106,27 +113,29 @@ export function Checklist({ taskId, autoFocus, placeholder = "Add an item" }: { 
 
   return (
     <div className="space-y-2">
-      <form
-        className="flex gap-2"
-        onSubmit={(e) => {
-          e.preventDefault()
-          submit()
-        }}
-      >
+      {/* Not a <form>: this list also lives inside the task editor's form, and nested
+          forms make the browser submit (and reload) the page. Enter is handled by hand. */}
+      <div className="flex gap-2">
         <Input
           ref={inputRef}
           autoFocus={autoFocus}
           value={text}
           onChange={(e) => setText(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault()
+              submit()
+            }
+          }}
           placeholder={placeholder}
           enterKeyHint="done"
           aria-label="New list item"
           className="h-11 rounded-xl text-base md:text-sm"
         />
-        <Button type="submit" className="h-11" disabled={!text.trim()} aria-label="Add item">
+        <Button type="button" className="h-11" disabled={!text.trim()} aria-label="Add item" onClick={submit}>
           <Plus />
         </Button>
-      </form>
+      </div>
       {items.length === 0 ? (
         <p className="px-1 text-sm text-muted-foreground">Nothing on the list yet. Tip: type several items separated by commas.</p>
       ) : (
