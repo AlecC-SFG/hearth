@@ -11,7 +11,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
-import { formatCode, HouseholdSwitcher, SyncBadge, WhoAreYou } from "@/components/household"
+import { formatCode, HouseholdSwitcher, SyncBadge, warnIfSameName, WhoAreYou } from "@/components/household"
 import { feedbackAvailable, openFeedback } from "@/lib/feedback"
 import { announceUpdate } from "@/lib/pwa"
 import { syncAvailable } from "@/lib/supabase"
@@ -242,8 +242,9 @@ function JoinFromLink({ code, onDone }: { code: string; onDone(): void }) {
             onClick={async () => {
               setBusy(true)
               try {
-                await joinHousehold(code)
+                const h = await joinHousehold(code)
                 toast.success("Joined! Your family's lists are loading.")
+                warnIfSameName(h.id)
               } catch (e) {
                 toast.error(e instanceof Error ? e.message : "Couldn't join")
               }

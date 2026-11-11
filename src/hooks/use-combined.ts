@@ -1,7 +1,7 @@
 import { useMemo } from "react"
 import { useNow } from "./use-media-query"
 import { isMine } from "./use-ranked"
-import { LOCAL, useParked } from "@/lib/households"
+import { displayName, LOCAL, useParked } from "@/lib/households"
 import { rankTasks, type Scored } from "@/lib/priority"
 import { useStore } from "@/lib/store"
 import { dayKey } from "@/lib/storage"
@@ -45,7 +45,11 @@ export function useCombined(): Combined {
 
   return useMemo(() => {
     const today = dayKey(new Date(minute))
-    const nameOf = (id: string) => (id === LOCAL ? "This phone only" : (households.find((h) => h.id === id)?.name ?? "Household"))
+    const nameOf = (id: string) => {
+      if (id === LOCAL) return "This phone only"
+      const h = households.find((x) => x.id === id)
+      return h ? displayName(h, households) : "Household"
+    }
     const activeId = active?.id ?? LOCAL
     const sources = [
       { id: activeId, isActive: true, members, projects, tasks, listItems, history, me },
@@ -103,7 +107,8 @@ export function startedElsewhere(): { taskId: string; title: string; spaceId: st
     if (id === activeId) continue
     if (id !== LOCAL && !st.households.some((h) => h.id === id)) continue
     if (!s.members.some((m) => m.id === s.currentMemberId)) continue
-    const name = id === LOCAL ? "This phone only" : (st.households.find((h) => h.id === id)?.name ?? "Household")
+    const h = st.households.find((x) => x.id === id)
+    const name = id === LOCAL ? "This phone only" : h ? displayName(h, st.households) : "Household"
     for (const t of s.tasks) {
       if (t.status === "doing" && isMine(t, s.currentMemberId)) out.push({ taskId: t.id, title: t.title, spaceId: id, spaceName: name })
     }

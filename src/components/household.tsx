@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react"
 import QRCode from "qrcode"
-import { Check, ChevronsUpDown, Cloud, CloudOff, Copy, Home, Loader2, LogOut, Plus, RefreshCw, Share2, Smartphone, UserPlus, Users } from "lucide-react"
+import { AlertTriangle, Check, ChevronsUpDown, Cloud, CloudOff, Copy, Home, Loader2, LogOut, Pencil, Plus, RefreshCw, Share2, Smartphone, UserPlus, Users } from "lucide-react"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -27,7 +27,19 @@ import { ResponsiveModal } from "@/components/responsive-modal"
 import { MemberAvatar } from "@/components/bits"
 import { MEMBER_COLORS, MEMBER_EMOJI, useStore } from "@/lib/store"
 import { syncAvailable } from "@/lib/supabase"
-import { createHousehold, joinHousehold, joinLink, leaveHousehold, LOCAL, newJoinCode, switchHousehold } from "@/lib/households"
+import {
+  createHousehold,
+  displayName,
+  joinHousehold,
+  joinLink,
+  leaveHousehold,
+  LOCAL,
+  newJoinCode,
+  renameHousehold,
+  sameNamed,
+  suggestName,
+  switchHousehold,
+} from "@/lib/households"
 import { useSync } from "@/lib/sync"
 import { cn } from "@/lib/utils"
 
@@ -62,8 +74,10 @@ export function JoinQR({ code, className }: { code: string; className?: string }
 /** Small cloud indicator for headers. */
 export function SyncBadge({ compact }: { compact?: boolean }) {
   const household = useStore((s) => s.household)
+  const households = useStore((s) => s.households)
   const { status, error } = useSync()
   if (!household) return null
+  const label = displayName(household, households)
   const map = {
     off: { icon: CloudOff, label: "Not syncing", cls: "text-muted-foreground" },
     connecting: { icon: Loader2, label: "Connecting…", cls: "text-muted-foreground [&_svg]:animate-spin" },
@@ -74,9 +88,9 @@ export function SyncBadge({ compact }: { compact?: boolean }) {
   }[status]
   const detail = status === "error" && error ? error : status === "offline" ? "Changes will sync when you're back online" : map.label
   return (
-    <span title={`${household.name}: ${detail}`} className={cn("inline-flex shrink-0 items-center gap-1.5 text-xs whitespace-nowrap", map.cls)}>
+    <span title={`${label}: ${detail}`} className={cn("inline-flex shrink-0 items-center gap-1.5 text-xs whitespace-nowrap", map.cls)}>
       <map.icon className="size-4" />
-      {!compact && <span className="truncate">{status === "synced" ? household.name : map.label}</span>}
+      {!compact && <span className="truncate">{status === "synced" ? label : map.label}</span>}
     </span>
   )
 }
@@ -84,10 +98,13 @@ export function SyncBadge({ compact }: { compact?: boolean }) {
 /** Create-or-join forms, used in Settings and in the household switcher. */
 export function HouseholdForms({ initialMode = "idle", onDone, compact }: { initialMode?: "idle" | "create" | "join"; onDone?(): void; compact?: boolean }) {
   const inHousehold = useStore((s) => !!s.household)
+  const households = useStore((s) => s.households)
+  const meName = useStore((s) => s.members.find((m) => m.id === s.settings.currentMemberId)?.name)
   const [mode, setMode] = useState(initialMode)
   const [name, setName] = useState("")
   const [code, setCode] = useState("")
   const [busy, setBusy] = useState(false)
+  const dupes = name.trim() ? sameNamed(name, households) : []
 
   const run = async (fn: () => Promise<unknown>, ok: string) => {
     setBusy(true)
@@ -127,6 +144,7 @@ export function HouseholdForms({ initialMode = "idle", onDone, compact }: { init
           }}
         >
           <Input autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder="Household name, e.g. The Smiths" className="h-10 rounded-xl" />
+          {dupes.length > 0 && <SameNameHint name={name} suggestion={suggestName(meName, households)} onUse={setName} />}
           <p className="text-xs text-muted-foreground">
             {inHousehold
               ? "It starts with just you. Your other households aren't affected."
@@ -147,7 +165,11 @@ export function HouseholdForms({ initialMode = "idle", onDone, compact }: { init
           className="space-y-2"
           onSubmit={(e) => {
             e.preventDefault()
-            if (code.trim()) void run(() => joinHousehold(code), "Joined! Their lists are loading.")
+            if (code.trim())
+              void run(async () => {
+                const h = await joinHousehold(code)
+                warnIfSameName(h.id)
+              }, "Joined! Their lists are loading.")
           }}
         >
           <Input
@@ -185,6 +207,9 @@ export function HouseholdSettings() {
   const { status, error } = useSync()
   const [busy, setBusy] = useState(false)
   const [confirmLeave, setConfirmLeave] = useState(false)
+  const [renaming, setRenaming] = useState(false)
+  const [newName, setNewName] = useState("")
+  const meName = useStore((s) => s.members.find((m) => m.id === s.settings.currentMemberId)?.name)
 
   if (!syncAvailable) return null
 
@@ -231,8 +256,67 @@ export function HouseholdSettings() {
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="text-xs text-muted-foreground">Household</div>
-          <div className="font-display text-xl font-semibold">{household.name}</div>
-          {others.length > 0 && <div className="text-xs text-muted-foreground">Also on this phone: {others.map((h) => h.name).join(", ")}</div>}
+          {renaming ? (
+            <form
+              className="mt-1 space-y-2"
+              onSubmit={async (e) => {
+                e.preventDefault()
+                setBusy(true)
+                try {
+                  await renameHousehold(newName)
+                  toast.success("Household renamed", { description: "Everyone in it will see the new name." })
+                  setRenaming(false)
+                } catch (err) {
+                  toast.error(err instanceof Error ? err.message : "Couldn't rename")
+                } finally {
+                  setBusy(false)
+                }
+              }}
+            >
+              <Input
+                autoFocus
+                value={newName}
+                maxLength={80}
+                onChange={(e) => setNewName(e.target.value)}
+                aria-label="New household name"
+                className="h-10 rounded-xl"
+              />
+              {sameNamed(newName, households, household.id).length > 0 && (
+                <SameNameHint name={newName} suggestion={suggestName(meName, households.filter((h) => h.id !== household.id))} onUse={setNewName} />
+              )}
+              <p className="text-xs text-muted-foreground">Everyone in this household will see the new name.</p>
+              <div className="flex gap-2">
+                <Button type="submit" size="sm" disabled={busy || !newName.trim() || newName.trim() === household.name}>
+                  {busy ? <Loader2 className="animate-spin" /> : <Check />} Save
+                </Button>
+                <Button type="button" size="sm" variant="ghost" onClick={() => setRenaming(false)}>
+                  Cancel
+                </Button>
+              </div>
+            </form>
+          ) : (
+            <div className="flex items-center gap-1">
+              <div className="font-display text-xl font-semibold">{household.name}</div>
+              <Button
+                size="icon-sm"
+                variant="ghost"
+                aria-label={`Rename ${household.name}`}
+                title="Rename"
+                onClick={() => {
+                  setNewName(household.name)
+                  setRenaming(true)
+                }}
+              >
+                <Pencil />
+              </Button>
+            </div>
+          )}
+          {!renaming && sameNamed(household.name, households, household.id).length > 0 && (
+            <div className="text-xs text-warm">Another household on this phone has the same name. Tap the pencil to rename this one.</div>
+          )}
+          {others.length > 0 && (
+            <div className="text-xs text-muted-foreground">Also on this phone: {others.map((h) => displayName(h, households)).join(", ")}</div>
+          )}
         </div>
         <SyncBadge />
       </div>
@@ -398,16 +482,16 @@ export function HouseholdSwitcher({ className }: { className?: string }) {
           aria-label="Switch household"
         >
           <Home className="size-4 shrink-0 text-primary" />
-          <span className="truncate">{household?.name ?? "This phone only"}</span>
+          <span className="truncate">{household ? displayName(household, households) : "This phone only"}</span>
           <ChevronsUpDown className="size-3.5 shrink-0 text-muted-foreground" />
         </DropdownMenuTrigger>
         <DropdownMenuContent align="start" className="min-w-60">
           <DropdownMenuGroup>
             <DropdownMenuLabel>Your households</DropdownMenuLabel>
             {households.map((h) => (
-              <DropdownMenuItem key={h.id} onClick={() => go(h.id, h.name)}>
+              <DropdownMenuItem key={h.id} onClick={() => go(h.id, displayName(h, households))}>
                 <Home />
-                <span className="flex-1 truncate">{h.name}</span>
+                <span className="flex-1 truncate">{displayName(h, households)}</span>
                 {household?.id === h.id && <Check className="text-primary" />}
               </DropdownMenuItem>
             ))}
@@ -442,4 +526,32 @@ export function HouseholdSwitcher({ className }: { className?: string }) {
       </ResponsiveModal>
     </>
   )
+}
+
+/** "You already have a household called …" with a one-tap better name. */
+function SameNameHint({ name, suggestion, onUse }: { name: string; suggestion: string; onUse(v: string): void }) {
+  return (
+    <div className="flex items-start gap-2 rounded-xl bg-warm/15 p-2.5 text-xs">
+      <AlertTriangle className="mt-0.5 size-3.5 shrink-0" />
+      <div className="space-y-1.5">
+        <p>
+          This phone already has a household called “{name.trim()}”. A different name makes them easy to tell apart in the menu and on Now.
+        </p>
+        <Button type="button" size="xs" variant="outline" onClick={() => onUse(suggestion)}>
+          Use “{suggestion}”
+        </Button>
+      </div>
+    </div>
+  )
+}
+
+/** After joining: point out when this phone now has two households with one name. */
+export function warnIfSameName(joinedId: string) {
+  const { households } = useStore.getState()
+  const joined = households.find((h) => h.id === joinedId)
+  if (!joined || !sameNamed(joined.name, households, joined.id).length) return
+  toast("Two households share a name", {
+    description: `You now have two called “${joined.name}”. They're labelled with the start of their codes; you can rename your own household in Settings.`,
+    duration: 8000,
+  })
 }

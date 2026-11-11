@@ -85,6 +85,8 @@ export function refreshParked(): Promise<void> {
   if (refreshing) return refreshing
   refreshing = (async () => {
     try {
+      // Pick up renames and new codes for every household, including parked ones
+      await refreshMemberships().catch(() => {})
       const st = useStore.getState()
       for (const h of st.households) {
         if (switching || h.id === activeSpaceId()) continue
@@ -254,6 +256,8 @@ export function leaveHousehold(id = activeSpaceId()): Promise<void> {
 }
 async function leaveHouseholdInner(id: string) {
   if (id === LOCAL) return
+  leaving.add(id)
+  setTimeout(() => leaving.delete(id), 60_000)
   const s = useStore.getState()
   const wasActive = id === activeSpaceId()
   if (wasActive) {
@@ -286,6 +290,8 @@ async function leaveHouseholdInner(id: string) {
 /** Leave every household and wipe this phone. */
 export async function eraseThisPhone() {
   const ids = useStore.getState().households.map((h) => h.id)
+  for (const id of ids) leaving.add(id)
+  setTimeout(() => ids.forEach((id) => leaving.delete(id)), 60_000)
   stopSync()
   for (const id of ids) {
     await forgetSyncState(id)
@@ -310,18 +316,29 @@ export async function refreshMemberships() {
   const { data: sess } = await supabase.auth.getSession()
   if (!sess.session) return // never synced: don't create an account just to look
   const { data, error } = await supabase.from("households").select("id,name,join_code")
-  if (error || !data) return
-  const server = (data as HouseRow[]).map(toHousehold)
+  // A join/leave/switch may have changed things while we were asking; try again next time
+  if (error || !data || switching) return
+  const server = (data as HouseRow[]).map(toHousehold).filter((h) => !leaving.has(h.id))
   const s = useStore.getState()
+  const activeId = activeSpaceId()
   const known = new Map(s.households.map((h) => [h.id, h]))
   let changed = false
-  const next = s.households.map((h) => {
+  const gone: string[] = []
+  const next = s.households.flatMap((h) => {
     const fresh = server.find((x) => x.id === h.id)
-    if (fresh && (fresh.name !== h.name || fresh.joinCode !== h.joinCode)) {
+    if (!fresh) {
+      // The server says this phone isn't in it any more (left on another version, or removed).
+      // Keep the one on screen so its sync error explains what happened.
+      if (h.id === activeId) return [h]
+      gone.push(h.id)
       changed = true
-      return fresh
+      return []
     }
-    return h
+    if (fresh.name !== h.name || fresh.joinCode !== h.joinCode) {
+      changed = true
+      return [fresh]
+    }
+    return [h]
   })
   for (const h of server) {
     if (!known.has(h.id)) {
@@ -332,7 +349,15 @@ export async function refreshMemberships() {
   if (!changed) return
   const active = s.household && next.find((h) => h.id === s.household!.id)
   useStore.setState({ households: next, ...(active ? { household: active } : {}) })
+  for (const id of gone) {
+    cacheSlot(id, undefined)
+    await forgetSyncState(id)
+    await idbDel(slotKey(id)).catch(() => {})
+  }
 }
+
+/** Households this phone is in the middle of leaving; never re-add them from the server. */
+const leaving = new Set<string>()
 
 export async function newJoinCode(): Promise<string> {
   const h = useStore.getState().household
@@ -343,12 +368,37 @@ export async function newJoinCode(): Promise<string> {
   return data as string
 }
 
+/** Rename the household on screen. Everyone in it sees the new name. */
 export async function renameHousehold(name: string) {
   const h = useStore.getState().household
+  const clean = name.trim().slice(0, 80)
   if (!supabase || !h) return
-  const { error } = await supabase.from("households").update({ name }).eq("id", h.id)
+  if (!clean) throw new Error("Give the household a name")
+  const { error } = await supabase.from("households").update({ name: clean }).eq("id", h.id)
   if (error) throw new Error(friendlyError(error))
-  useStore.getState().setHousehold({ ...h, name })
+  useStore.getState().setHousehold({ ...h, name: clean })
+}
+
+const normName = (n: string) => n.trim().replace(/\s+/g, " ").toLocaleLowerCase()
+
+/** Other households on this phone with the same name (ignoring case and extra spaces). */
+export function sameNamed(name: string, list: Household[] = useStore.getState().households, exceptId?: string): Household[] {
+  return list.filter((h) => h.id !== exceptId && normName(h.name) === normName(name))
+}
+
+/**
+ * The name to show for a household. When another household on this phone has
+ * the same name, add the start of its join code so the two can be told apart.
+ */
+export function displayName(h: Household, list: Household[] = useStore.getState().households): string {
+  return sameNamed(h.name, list, h.id).length ? `${h.name} · ${h.joinCode.slice(0, 4)}` : h.name
+}
+
+/** A distinct name to suggest, based on the person using this phone. */
+export function suggestName(personName: string | undefined, list: Household[] = useStore.getState().households): string {
+  const who = personName?.trim()
+  const options = who ? [`${who}'s family`, `${who}'s household`, `${who}'s home`] : ["Our family", "Our household", "Our home"]
+  return options.find((o) => !sameNamed(o, list).length) ?? `${options[0]} 2`
 }
 
 export function joinLink(code: string): string {
