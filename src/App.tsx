@@ -15,7 +15,7 @@ import { formatCode, HouseholdSwitcher, SyncBadge, WhoAreYou } from "@/component
 import { feedbackAvailable, openFeedback } from "@/lib/feedback"
 import { announceUpdate } from "@/lib/pwa"
 import { syncAvailable } from "@/lib/supabase"
-import { joinHousehold, refreshMemberships } from "@/lib/households"
+import { joinHousehold, refreshMemberships, startParkedRefresher } from "@/lib/households"
 import { startSync } from "@/lib/sync"
 import { Button } from "@/components/ui/button"
 import { Confetti } from "@/components/ui/confetti"
@@ -267,6 +267,13 @@ export default function App() {
   useEffect(() => {
     if (hydrated) announceUpdate()
   }, [hydrated])
+
+  // Keep the other households fresh for the combined Now view
+  const householdCount = useStore((s) => s.households.length)
+  useEffect(() => {
+    if (!hydrated || householdCount < 2) return
+    return startParkedRefresher()
+  }, [hydrated, householdCount])
 
   useEffect(() => {
     if (!hydrated) return

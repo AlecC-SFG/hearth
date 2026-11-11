@@ -10,12 +10,13 @@
 import { del as idbDel, get as idbGet, set as idbSet } from "idb-keyval"
 import { ensureSession, friendlyError, supabase } from "./supabase"
 import { useStore, type Household } from "./store"
-import { enqueueEverything, flushNow, forgetSyncState, startSync, stopSync, withoutSync } from "./sync"
+import { create } from "zustand"
+import { enqueueEverything, fetchChanges, flushNow, forgetSyncState, mergeRows, saveCursor, startSync, stopSync, uploadQueued, withoutSync } from "./sync"
 import type { ListItem, Member, Project, Task } from "./types"
 
 export const LOCAL = "local"
 
-interface Slot {
+export interface Slot {
   members: Member[]
   projects: Project[]
   tasks: Task[]
@@ -44,6 +45,86 @@ function currentSlot(): Slot {
   }
 }
 
+/* ------------------------------------------------------------------ */
+/* Parked households, kept in memory for the combined Now view         */
+/* ------------------------------------------------------------------ */
+
+/** Every household (and "this phone only") that is NOT on screen, keyed by id */
+export const useParked = create<{ spaces: Record<string, Slot>; refreshedAt?: number }>(() => ({ spaces: {} }))
+
+function cacheSlot(id: string, slot: Slot | undefined) {
+  useParked.setState((p) => {
+    const spaces = { ...p.spaces }
+    if (slot) spaces[id] = slot
+    else delete spaces[id]
+    return { spaces }
+  })
+}
+
+let switching = 0
+let refreshing: Promise<void> | null = null
+
+/** Load every parked household from this phone's storage (no network). */
+export async function loadParked() {
+  const st = useStore.getState()
+  const active = activeSpaceId()
+  const ids = [...st.households.map((h) => h.id), ...(st.hasLocalSpace ? [LOCAL] : [])].filter((id) => id !== active)
+  const spaces: Record<string, Slot> = {}
+  for (const id of ids) {
+    const slot = await idbGet<Slot>(slotKey(id)).catch(() => undefined)
+    if (slot) spaces[id] = slot
+  }
+  useParked.setState({ spaces })
+}
+
+/**
+ * Bring parked households up to date from the server, so the combined Now view
+ * sees what other households assigned to you. Skips anything mid-switch.
+ */
+export function refreshParked(): Promise<void> {
+  if (refreshing) return refreshing
+  refreshing = (async () => {
+    try {
+      const st = useStore.getState()
+      for (const h of st.households) {
+        if (switching || h.id === activeSpaceId()) continue
+        try {
+          const stillQueued = await uploadQueued(h.id)
+          const { rows, last } = await fetchChanges(h.id)
+          if (switching || h.id === activeSpaceId()) continue
+          const slot = (await idbGet<Slot>(slotKey(h.id)).catch(() => undefined)) ?? { ...EMPTY }
+          const merged = mergeRows({ ...EMPTY, ...slot, listItems: slot.listItems ?? [] }, rows, (k) => stillQueued.has(k))
+          const next: Slot = { ...slot, ...merged }
+          if (switching || h.id === activeSpaceId()) continue
+          await idbSet(slotKey(h.id), next)
+          if (last) await saveCursor(h.id, last)
+          cacheSlot(h.id, next)
+        } catch {
+          /* offline or not a member any more: keep what we have */
+        }
+      }
+      useParked.setState({ refreshedAt: Date.now() })
+    } finally {
+      refreshing = null
+    }
+  })()
+  return refreshing
+}
+
+/** Keep parked households fresh: now, whenever the app returns, and every 3 minutes. */
+export function startParkedRefresher() {
+  void loadParked().then(() => refreshParked())
+  const tick = () => {
+    if (document.visibilityState === "visible" && useStore.getState().households.length > 1) void refreshParked()
+  }
+  document.addEventListener("visibilitychange", tick)
+  const id = setInterval(tick, 3 * 60 * 1000)
+  return () => {
+    document.removeEventListener("visibilitychange", tick)
+    clearInterval(id)
+  }
+}
+
 /** Park the lists on screen so another household can be shown. */
 async function park() {
   const s = useStore.getState()
@@ -54,11 +135,13 @@ async function park() {
   const slot = currentSlot()
   await idbSet(slotKey(id), slot)
   if (id === LOCAL) useStore.setState({ hasLocalSpace: hasData(slot) })
+  if (id !== LOCAL || hasData(slot)) cacheSlot(id, slot)
 }
 
 /** Bring a parked household (or the phone-only list) onto the screen and start syncing it. */
 async function show(id: string, household: Household | undefined) {
   const slot = (await idbGet<Slot>(slotKey(id)).catch(() => undefined)) ?? EMPTY
+  cacheSlot(id, undefined) // it's on screen now, not parked
   withoutSync(() =>
     useStore.setState((s) => ({
       onboarded: true,
@@ -80,8 +163,21 @@ export async function switchHousehold(id: string) {
   if (id === activeSpaceId()) return
   const household = id === LOCAL ? undefined : useStore.getState().households.find((h) => h.id === id)
   if (id !== LOCAL && !household) throw new Error("This phone isn't part of that household.")
-  await park()
-  await show(id, household)
+  await guarded(async () => {
+    await park()
+    await show(id, household)
+  })
+}
+
+/** Run something that swaps what's on screen, never overlapping a background refresh. */
+async function guarded<T>(fn: () => Promise<T>): Promise<T> {
+  switching++
+  try {
+    await refreshing
+    return await fn()
+  } finally {
+    switching--
+  }
 }
 
 interface HouseRow {
@@ -97,7 +193,10 @@ const toHousehold = (r: HouseRow): Household => ({ id: r.id, name: r.name, joinC
  * - Viewing "this phone only": those lists become the new household's starting lists.
  * - Viewing another household: the new one starts empty except for you.
  */
-export async function createHousehold(name: string): Promise<Household> {
+export function createHousehold(name: string): Promise<Household> {
+  return guarded(() => createHouseholdInner(name))
+}
+async function createHouseholdInner(name: string): Promise<Household> {
   if (!supabase) throw new Error("Sync isn't available in this version.")
   await ensureSession()
   const { data, error } = await supabase.rpc("create_household", { p_name: name })
@@ -125,7 +224,10 @@ export async function createHousehold(name: string): Promise<Household> {
 }
 
 /** Join a household by code. Nothing already on this phone is replaced. */
-export async function joinHousehold(code: string): Promise<Household> {
+export function joinHousehold(code: string): Promise<Household> {
+  return guarded(() => joinHouseholdInner(code))
+}
+async function joinHouseholdInner(code: string): Promise<Household> {
   if (!supabase) throw new Error("Sync isn't available in this version.")
   await ensureSession()
   const { data, error } = await supabase.rpc("join_household", { p_code: code })
@@ -147,7 +249,10 @@ export async function joinHousehold(code: string): Promise<Household> {
 }
 
 /** Remove a household from this phone. Everyone else in it keeps everything. */
-export async function leaveHousehold(id = activeSpaceId()) {
+export function leaveHousehold(id = activeSpaceId()): Promise<void> {
+  return guarded(() => leaveHouseholdInner(id))
+}
+async function leaveHouseholdInner(id: string) {
   if (id === LOCAL) return
   const s = useStore.getState()
   const wasActive = id === activeSpaceId()
@@ -157,6 +262,7 @@ export async function leaveHousehold(id = activeSpaceId()) {
   }
   await forgetSyncState(id)
   await idbDel(slotKey(id)).catch(() => {})
+  cacheSlot(id, undefined)
   const remaining = s.households.filter((h) => h.id !== id)
   useStore.setState({ households: remaining })
 
@@ -186,6 +292,7 @@ export async function eraseThisPhone() {
     await idbDel(slotKey(id)).catch(() => {})
   }
   await idbDel(slotKey(LOCAL)).catch(() => {})
+  useParked.setState({ spaces: {} })
   if (supabase && ids.length) {
     const { data } = await supabase.auth.getSession()
     const uid = data.session?.user.id

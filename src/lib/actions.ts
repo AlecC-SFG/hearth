@@ -2,6 +2,8 @@ import { toast } from "sonner"
 import { primeAudio, requestNotify } from "./alerts"
 import { useStore } from "./store"
 import { useUI } from "./ui"
+import { activeSpaceId, switchHousehold } from "./households"
+import { startedElsewhere } from "@/hooks/use-combined"
 
 const ENCOURAGEMENT = [
   "Done! That's one less thing on your mind.",
@@ -54,8 +56,10 @@ export function requestFocus(taskId: string, minutes?: number) {
   const doing = s.tasks.filter(
     (t) => t.id !== taskId && t.status === "doing" && (t.assigneeIds.includes(me) || t.assigneeIds.length === 0),
   )
+  // Things you've started in your other households count toward the limit too
+  const elsewhere = startedElsewhere().filter((x) => x.taskId !== taskId)
   const task = s.tasks.find((t) => t.id === taskId)
-  if (task?.status !== "doing" && doing.length >= s.settings.wipLimit) {
+  if (task?.status !== "doing" && doing.length + elsewhere.length >= s.settings.wipLimit) {
     useUI.getState().setWipPending({ taskId, minutes: mins })
     return
   }
@@ -90,4 +94,22 @@ export function reopenWithToast(id: string) {
       },
     },
   })
+}
+
+/**
+ * Do something to a task that may live in a household that isn't on screen:
+ * switch to that household first (so all the normal sync, focus and completion
+ * logic applies), then act.
+ */
+export async function actIn(spaceId: string, spaceName: string, fn: () => void) {
+  if (spaceId !== activeSpaceId()) {
+    try {
+      await switchHousehold(spaceId)
+      toast(`Switched to ${spaceName}`, { duration: 2500 })
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Couldn't open that household")
+      return
+    }
+  }
+  fn()
 }

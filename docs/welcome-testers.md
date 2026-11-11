@@ -27,6 +27,10 @@ Each household keeps its own lists, and you switch between them from that same m
 Your kids only see the households they join, so joining yours doesn't show them
 Grandma's.
 
+The **Now** tab looks across all your households, so if Grandma assigns you something
+urgent it can become your "one thing" even while you're looking at your own family.
+Use the **All households / Just …** switch at the top of Now to focus on one.
+
 ## Things to try
 
 - **Now** tab: it shows just one thing to do. Try *Start*, *It's done*, and *Not this one*.

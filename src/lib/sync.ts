@@ -18,7 +18,7 @@ import { useStore, type Household } from "./store"
 import type { ListItem, Member, Project, Task } from "./types"
 
 type Kind = "member" | "project" | "task" | "history" | "listitem"
-interface Row {
+export interface Row {
   kind: Kind
   id: string
   data: unknown
@@ -225,57 +225,99 @@ function upsertIn<T extends { id: string }>(list: T[], row: Row, prepend: boolea
   return copy
 }
 
+/** The synced parts of one household's data */
+export interface Lists {
+  members: Member[]
+  projects: Project[]
+  tasks: Task[]
+  listItems: ListItem[]
+  history: Record<string, Record<string, number>>
+}
+
+/** Pure: apply server rows to a household's lists. skip() lets newer local edits win. */
+export function mergeRows(base: Lists, rows: Row[], skip?: (key: string) => boolean): Lists {
+  let { members, projects, tasks, history, listItems } = base
+  for (const row of rows) {
+    if (skip?.(keyOf(row.kind, row.id))) continue
+    if (row.kind === "member") members = upsertIn<Member>(members, row, false)
+    else if (row.kind === "project") projects = upsertIn<Project>(projects, row, false)
+    else if (row.kind === "task") tasks = upsertIn<Task>(tasks, row, true)
+    else if (row.kind === "listitem") listItems = upsertIn<ListItem>(listItems, row, false)
+    else if (row.kind === "history") {
+      const [day, mid] = row.id.split("|")
+      const dayMap = { ...history[day] }
+      if (row.deleted) delete dayMap[mid]
+      else dayMap[mid] = Number(row.data) || 0
+      history = { ...history, [day]: dayMap }
+    }
+  }
+  return { members, projects, tasks, history, listItems }
+}
+
 function applyRows(rows: Row[]) {
   if (!rows.length) return
   applyingRemote = true
   try {
-    useStore.setState((s) => {
-      let { members, projects, tasks, history, listItems } = s
-      for (const row of rows) {
-        if (pending.has(keyOf(row.kind, row.id))) continue // our newer local edit wins until pushed
-        if (row.kind === "member") members = upsertIn<Member>(members, row, false)
-        else if (row.kind === "project") projects = upsertIn<Project>(projects, row, false)
-        else if (row.kind === "task") tasks = upsertIn<Task>(tasks, row, true)
-        else if (row.kind === "listitem") listItems = upsertIn<ListItem>(listItems, row, false)
-        else if (row.kind === "history") {
-          const [day, mid] = row.id.split("|")
-          const dayMap = { ...history[day] }
-          if (row.deleted) delete dayMap[mid]
-          else dayMap[mid] = Number(row.data) || 0
-          history = { ...history, [day]: dayMap }
-        }
-      }
-      return { members, projects, tasks, history, listItems }
-    })
+    // our newer local edit wins until pushed
+    useStore.setState((s) => mergeRows(s, rows, (k) => pending.has(k)))
   } finally {
     applyingRemote = false
   }
 }
 
-async function pull() {
-  if (!supabase || !currentHouse) return
-  const house = currentHouse
+async function readCursor(house: string): Promise<string | undefined> {
   let at = await idbGet<string>(cursorKey(house)).catch(() => undefined)
   if (!at) {
     const legacy = await idbGet<{ house: string; at: string }>(LEGACY_CURSOR_KEY).catch(() => undefined)
     if (legacy?.house === house) at = legacy.at
   }
-  // Re-read a 30 s overlap so rows committed slightly out of order aren't missed
+  return at
+}
+
+/** Everything that changed in a household since this phone last looked (with a 30 s overlap). */
+export async function fetchChanges(house: string): Promise<{ rows: Row[]; last?: string }> {
+  if (!supabase) return { rows: [] }
+  const at = await readCursor(house)
   let since = at ? new Date(new Date(at).getTime() - 30_000).toISOString() : undefined
   let last = at
+  const all: Row[] = []
   for (;;) {
     let q = supabase.from("items").select("kind,id,data,deleted,updated_at").eq("household_id", house).order("updated_at").limit(1000)
     if (since) q = q.gte("updated_at", since)
     const { data, error } = await q
     if (error) throw error
-    if (house !== currentHouse) return
     const rows = (data ?? []) as Row[]
-    applyRows(rows)
+    all.push(...rows)
     if (rows.length) last = rows[rows.length - 1].updated_at
     if (rows.length < 1000) break
     since = last
   }
-  if (last && house === currentHouse) await idbSet(cursorKey(house), last).catch(() => {})
+  return { rows: all, last }
+}
+
+export async function saveCursor(house: string, at: string) {
+  await idbSet(cursorKey(house), at).catch(() => {})
+}
+
+/** Upload a background household's leftover queue (e.g. after switching mid-upload). */
+export async function uploadQueued(house: string): Promise<Set<string>> {
+  const queued = (await idbGet<Change[]>(pendingKey(house)).catch(() => undefined)) ?? []
+  const keys = new Set(queued.map((c) => keyOf(c.kind, c.id)))
+  if (!supabase || !queued.length || !navigator.onLine) return keys
+  const rows = queued.map((c) => ({ household_id: house, kind: c.kind, id: c.id, data: c.data ?? null, deleted: c.data == null }))
+  const { error } = await supabase.from("items").upsert(rows, { onConflict: "household_id,kind,id" })
+  if (error) return keys
+  await idbDel(pendingKey(house)).catch(() => {})
+  return new Set()
+}
+
+async function pull() {
+  if (!supabase || !currentHouse) return
+  const house = currentHouse
+  const { rows, last } = await fetchChanges(house)
+  if (house !== currentHouse) return
+  applyRows(rows)
+  if (last && house === currentHouse) await saveCursor(house, last)
   await refreshHousehold()
 }
 
