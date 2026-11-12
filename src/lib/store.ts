@@ -1,6 +1,7 @@
 import { create } from "zustand"
 import { createJSONStorage, persist } from "zustand/middleware"
-import { addDays, addWeeks } from "date-fns"
+import { addDays } from "date-fns"
+import { isExpiredDone, isOpenEnded, nextOccurrence, periodStart } from "./schedule"
 import { dayKey, storage, uid } from "./storage"
 import type { FocusSession, ListItem, Member, Project, Settings, Task } from "./types"
 
@@ -53,6 +54,8 @@ interface Actions {
   completeTask(id: string, memberId?: string): string | undefined
   /** Put a completed task back. undo = quietly reverse a mis-tap (no "reopened by" tag). */
   reopenTask(id: string, opts?: { undo?: boolean }): void
+  /** Daily housekeeping: fresh starts for open-ended repeating tasks, clear away old finished ones */
+  tidy(now?: Date): void
   addListItem(taskId: string, text: string): string
   updateListItem(id: string, patch: Partial<ListItem>): void
   removeListItem(id: string): ListItem | undefined
@@ -227,8 +230,7 @@ export const useStore = create<State & Actions>()(
         const extra: Task[] = []
         const carried: ListItem[] = []
         if (t.recurrence !== "none") {
-          const base = t.dueAt ? new Date(t.dueAt) : new Date()
-          const next = t.recurrence === "daily" ? addDays(base, 1) : addWeeks(base, 1)
+          const next = nextOccurrence(t)
           extra.push(
             makeTask({
               ...t,
@@ -236,7 +238,8 @@ export const useStore = create<State & Actions>()(
               status: "todo",
               progress: 0,
               steps: t.steps.map((s) => ({ ...s, done: false })),
-              dueAt: next.toISOString(),
+              dueAt: next.dueAt,
+              showFrom: next.showFrom,
               timeSpentMin: 0,
               dailyMin: {},
               resumeNote: undefined,
@@ -326,6 +329,52 @@ export const useStore = create<State & Actions>()(
               ),
             listItems: dropNext ? s.listItems.filter((i) => i.taskId !== next!.id) : s.listItems,
           }
+        })
+      },
+
+      tidy(now = new Date()) {
+        const s = get()
+        const withList = new Set(s.listItems.map((i) => i.taskId))
+        // Finished over a week ago: clear away, unless a list is attached (kept as a saved list)
+        const drop = new Set(s.tasks.filter((t) => isExpiredDone(t, now.getTime()) && !withList.has(t.id)).map((t) => t.id))
+        let changed = drop.size > 0
+        const ts = nowIso()
+        const cleared = new Map<string, number>()
+        for (const t of s.tasks) if (drop.has(t.id) && t.projectId) cleared.set(t.projectId, (cleared.get(t.projectId) ?? 0) + t.estimateMin)
+        const tasks = s.tasks
+          .filter((t) => !drop.has(t.id))
+          .map((t) => {
+            let out = t
+            if (drop.size && t.dependsOn.some((d) => drop.has(d))) out = { ...out, dependsOn: out.dependsOn.filter((d) => !drop.has(d)) }
+            if (t.status === "done" || !isOpenEnded(t)) return out
+            const start = periodStart(t.recurrence, now)
+            if (!t.showFrom) {
+              changed = true
+              return { ...out, showFrom: start.toISOString(), updatedAt: ts }
+            }
+            // Its day or week went by: no "overdue", it simply starts fresh for this one
+            if (new Date(t.showFrom) < start && s.focus?.taskId !== t.id) {
+              changed = true
+              return {
+                ...out,
+                showFrom: start.toISOString(),
+                status: t.status === "parked" ? ("parked" as const) : ("todo" as const),
+                progress: 0,
+                steps: t.steps.map((st) => ({ ...st, done: false })),
+                timeSpentMin: 0,
+                reopenedBy: undefined,
+                reopenedAt: undefined,
+                updatedAt: ts,
+              }
+            }
+            return out
+          })
+        if (!changed) return
+        set({
+          tasks,
+          projects: cleared.size
+            ? s.projects.map((p) => (cleared.has(p.id) ? { ...p, clearedMin: (p.clearedMin ?? 0) + cleared.get(p.id)! } : p))
+            : s.projects,
         })
       },
 

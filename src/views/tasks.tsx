@@ -1,17 +1,20 @@
 import { useMemo, useState, type ReactNode } from "react"
-import { ChevronDown, Info, Plus, RotateCcw, Search } from "lucide-react"
-import { formatDistanceToNow } from "date-fns"
+import { ChevronDown, Info, ListChecks, Plus, RotateCcw, Search, Trash2 } from "lucide-react"
+import { format, formatDistanceToNow } from "date-fns"
+import { toast } from "sonner"
 import { reopenWithToast } from "@/lib/actions"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { EmptyState, MemberAvatar } from "@/components/bits"
 import { CheckCircle, TaskRow } from "@/components/task-row"
+import { useNow } from "@/hooks/use-media-query"
 import { isMine, useMe, useRanked } from "@/hooks/use-ranked"
 import { useStore } from "@/lib/store"
 import { useUI } from "@/lib/ui"
 import { cn } from "@/lib/utils"
-import type { Scored } from "@/lib/priority"
+import { scoreTask, type Scored } from "@/lib/priority"
+import { isExpiredDone, isRecentlyDone, isUpcoming, showsFrom, upcomingLabel } from "@/lib/schedule"
 
 function Section({ title, count, children, defaultOpen = true, hint }: { title: string; count: number; children: ReactNode; defaultOpen?: boolean; hint?: string }) {
   const [open, setOpen] = useState(defaultOpen)
@@ -61,6 +64,8 @@ export function TasksView() {
   const tasks = useStore((s) => s.tasks)
   const members = useStore((s) => s.members)
   const projects = useStore((s) => s.projects)
+  const listItems = useStore((s) => s.listItems)
+  const openList = useUI((u) => u.openList)
   const newTask = useUI((u) => u.newTask)
   const editTask = useUI((u) => u.editTask)
   const projectFilter = useUI((u) => u.projectFilter)
@@ -80,10 +85,25 @@ export function TasksView() {
   const ready = list.filter((s) => !s.blocked && s.task.status !== "parked")
   const blocked = list.filter((s) => s.blocked && s.task.status !== "parked")
   const parked = list.filter((s) => s.task.status === "parked")
+  const now = useNow(60_000)
   const done = tasks
-    .filter((t) => t.status === "done" && match(t) && Date.now() - new Date(t.completedAt ?? 0).getTime() < 14 * 86_400_000)
+    .filter((t) => isRecentlyDone(t, now) && match(t))
     .sort((a, b) => (b.completedAt ?? "").localeCompare(a.completedAt ?? ""))
-    .slice(0, 20)
+  // Repeating tasks whose day or week hasn't started: out of the way, but findable
+  const upcoming = tasks
+    .filter((t) => isUpcoming(t, now) && match(t))
+    .sort((a, b) => (showsFrom(a)?.getTime() ?? 0) - (showsFrom(b)?.getTime() ?? 0))
+    .map((t) => scoreTask(t, tasks, now))
+  // Finished over a week ago but with a list attached: kept until someone deletes it
+  const listCount = new Map<string, number>()
+  for (const i of listItems) listCount.set(i.taskId, (listCount.get(i.taskId) ?? 0) + 1)
+  const saved = tasks
+    .filter((t) => isExpiredDone(t, now) && listCount.has(t.id) && match(t))
+    .sort((a, b) => (b.completedAt ?? "").localeCompare(a.completedAt ?? ""))
+  const deleteSaved = (id: string) => {
+    const removed = useStore.getState().removeTask(id)
+    if (removed) toast("List deleted", { description: removed.title, action: { label: "Undo", onClick: () => useStore.getState().restoreTask(removed) } })
+  }
 
   return (
     <div className="space-y-5">
@@ -128,7 +148,7 @@ export function TasksView() {
         </div>
       </div>
 
-      {ready.length + blocked.length + parked.length + done.length === 0 ? (
+      {ready.length + blocked.length + parked.length + done.length + upcoming.length + saved.length === 0 ? (
         <EmptyState emoji="📝" title={q ? "No matches" : "Nothing here yet"}>
           {q ? "Try a different search." : "Add your first task with the + button."}
         </EmptyState>
@@ -143,7 +163,15 @@ export function TasksView() {
           <Section title="Parked" count={parked.length} defaultOpen={false}>
             {parked.map((s) => <TaskRow key={s.task.id} s={s} />)}
           </Section>
-          <Section title="Recently done" count={done.length} defaultOpen={done.length <= 5} hint="tap “Not done yet” if it isn't">
+          <Section title="Coming up" count={upcoming.length} defaultOpen={false} hint="repeating tasks show up on their day">
+            {upcoming.map((s) => (
+              <div key={s.task.id} className="space-y-1">
+                <p className="px-1 text-xs text-muted-foreground">Shows up {upcomingLabel(s.task)}</p>
+                <TaskRow s={s} showScore={false} />
+              </div>
+            ))}
+          </Section>
+          <Section title="Recently done" count={done.length} defaultOpen={done.length <= 5} hint="clears away after 7 days">
             {done.map((t) => {
               const by = members.find((m) => m.id === t.completedBy)
               return (
@@ -163,6 +191,26 @@ export function TasksView() {
                 </div>
               )
             })}
+          </Section>
+          <Section title="Saved lists" count={saved.length} defaultOpen={false} hint="from finished tasks, kept until you delete them">
+            {saved.map((t) => (
+              <div key={t.id} className="flex items-center gap-3 rounded-2xl border bg-card/60 p-3">
+                <ListChecks className="size-5 shrink-0 text-muted-foreground" />
+                <button type="button" className="min-w-0 flex-1 text-left" onClick={() => openList(t.id)}>
+                  <span className="block truncate font-medium">{t.title}</span>
+                  <span className="block text-xs text-muted-foreground">
+                    {listCount.get(t.id)} {listCount.get(t.id) === 1 ? "item" : "items"}
+                    {t.completedAt ? ` · done ${format(new Date(t.completedAt), "MMM d")}` : ""}
+                  </span>
+                </button>
+                <Button size="sm" variant="outline" onClick={() => openList(t.id)}>
+                  Open
+                </Button>
+                <Button size="icon-sm" variant="ghost" aria-label={`Delete list: ${t.title}`} title="Delete list" onClick={() => deleteSaved(t.id)}>
+                  <Trash2 />
+                </Button>
+              </div>
+            ))}
           </Section>
         </div>
       )}

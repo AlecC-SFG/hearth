@@ -3,6 +3,7 @@ import { primeAudio, requestNotify } from "./alerts"
 import { useStore } from "./store"
 import { useUI } from "./ui"
 import { activeSpaceId, switchHousehold } from "./households"
+import { isUpcoming, upcomingLabel } from "./schedule"
 import { startedElsewhere } from "@/hooks/use-combined"
 
 const ENCOURAGEMENT = [
@@ -24,10 +25,15 @@ export function completeTask(id: string) {
   const s = useStore.getState()
   const task = s.tasks.find((t) => t.id === id)
   if (!task) return
-  s.completeTask(id)
+  const nextId = s.completeTask(id)
+  const next = nextId ? useStore.getState().tasks.find((t) => t.id === nextId) : undefined
   celebrate()
   toast.success(ENCOURAGEMENT[Math.floor(Math.random() * ENCOURAGEMENT.length)], {
-    description: task.recurrence !== "none" ? `“${task.title}” will come back ${task.recurrence === "daily" ? "tomorrow" : "next week"}.` : task.title,
+    description: next
+      ? isUpcoming(next)
+        ? `“${task.title}” will be back ${upcomingLabel(next)}.`
+        : `The next “${task.title}” is on your list.`
+      : task.title,
     action: {
       label: "Undo",
       onClick: () => useStore.getState().reopenTask(id, { undo: true }),

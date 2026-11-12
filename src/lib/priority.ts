@@ -1,3 +1,4 @@
+import { isUpcoming } from "./schedule"
 import type { Task } from "./types"
 
 export interface ScorePart {
@@ -115,9 +116,10 @@ export function scoreTask(task: Task, all: Task[], now = Date.now()): Scored {
   return { task, score, parts, progress, remainingMin, blocked, blockedBy, unblocks, overdue }
 }
 
+/** Open tasks for today, best first. Repeating tasks whose day or week hasn't come yet are left out. */
 export function rankTasks(tasks: Task[], now = Date.now()): Scored[] {
   return tasks
-    .filter((t) => t.status !== "done")
+    .filter((t) => t.status !== "done" && !isUpcoming(t, now))
     .map((t) => scoreTask(t, tasks, now))
     .sort((a, b) => Number(a.blocked) - Number(b.blocked) || b.score - a.score)
 }

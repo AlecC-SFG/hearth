@@ -17,6 +17,8 @@ export interface Project {
   color: string
   description?: string
   archived?: boolean
+  /** Estimated minutes of finished tasks that were cleared away, so progress doesn't slide back */
+  clearedMin?: number
 }
 
 export interface Step {
@@ -41,6 +43,8 @@ export interface Task {
   energy: Energy
   resources: string[]
   recurrence: Recurrence
+  /** Repeating tasks: the start of the day or week this occurrence belongs to (see lib/schedule.ts) */
+  showFrom?: string
   /** "Where I left off" — shown first next time the task is picked up */
   resumeNote?: string
   timeSpentMin: number

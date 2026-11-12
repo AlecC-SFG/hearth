@@ -11,6 +11,7 @@ import { EmptyState, ProgressBar } from "@/components/bits"
 import { useMe, useRanked, isMine } from "@/hooks/use-ranked"
 import { formatMinutes } from "@/lib/format"
 import type { Scored } from "@/lib/priority"
+import { isUpcoming } from "@/lib/schedule"
 import { MEMBER_COLORS, useStore } from "@/lib/store"
 import type { Project } from "@/lib/types"
 import { useUI } from "@/lib/ui"
@@ -170,9 +171,9 @@ export function ProjectsView() {
       ) : (
         <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
           {active.map((p) => {
-            const pt = tasks.filter((t) => t.projectId === p.id)
+            const pt = tasks.filter((t) => t.projectId === p.id && !isUpcoming(t))
             const open = ranked.filter((s) => s.task.projectId === p.id)
-            const total = pt.reduce((m, t) => m + t.estimateMin, 0)
+            const total = pt.reduce((m, t) => m + t.estimateMin, p.clearedMin ?? 0)
             const left = open.reduce((m, s) => m + s.remainingMin, 0)
             const pct = total ? (total - left) / total : 0
             const next = open.find((s) => !s.blocked)

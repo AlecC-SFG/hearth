@@ -30,6 +30,7 @@ import { Onboarding } from "@/components/onboarding"
 import { SettingsDialog } from "@/components/settings-dialog"
 import { TaskEditor } from "@/components/task-editor"
 import { WipGuard } from "@/components/wip-guard"
+import { useNow } from "@/hooks/use-media-query"
 import { isMine, useMe, useRanked } from "@/hooks/use-ranked"
 import { useStore } from "@/lib/store"
 import { useUI, type View } from "@/lib/ui"
@@ -275,6 +276,12 @@ export default function App() {
     if (!hydrated || householdCount < 2) return
     return startParkedRefresher()
   }, [hydrated, householdCount])
+
+  // Housekeeping: fresh starts for open-ended repeating tasks, clear away week-old finished ones
+  const minute = useNow(60_000)
+  useEffect(() => {
+    if (hydrated && onboarded) useStore.getState().tidy()
+  }, [hydrated, onboarded, householdId, minute])
 
   useEffect(() => {
     if (!hydrated) return

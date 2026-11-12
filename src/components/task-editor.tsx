@@ -14,6 +14,7 @@ import { Checklist, useListItems } from "@/components/checklist"
 import { deleteTask, reopenWithToast } from "@/lib/actions"
 import { formatMinutes, fromLocalInput, toLocalInput } from "@/lib/format"
 import { createsCycle } from "@/lib/priority"
+import { isUpcoming, upcomingLabel } from "@/lib/schedule"
 import { makeTask, useStore } from "@/lib/store"
 import { uid } from "@/lib/storage"
 import type { Energy, Importance, Recurrence, Task } from "@/lib/types"
@@ -109,7 +110,7 @@ export function TaskEditor() {
     if (isNew) {
       const { createdAt: _c, updatedAt: _u, ...rest } = final
       addTask(rest) // keeps the draft's id, so a list started here stays attached
-      toast.success("Added", { description: title })
+      toast.success("Added", { description: isUpcoming(final) ? `${title}. It'll show up ${upcomingLabel(final)}.` : title })
     } else {
       // Only save what this form edits. Completion state and focus time may have
       // changed on another phone (or via "Not done yet") while the form was open.
@@ -124,6 +125,7 @@ export function TaskEditor() {
         timeSpentMin: _ts,
         dailyMin: _dm,
         createdAt: _cr,
+        showFrom: _sf, // kept up to date by the daily tidy-up, not this form
         ...editable
       } = final
       if (live?.status === "done") {
@@ -132,6 +134,10 @@ export function TaskEditor() {
         delete (editable as Partial<Task>).progress
       }
       updateTask(final.id, editable)
+      const saved = useStore.getState().tasks.find((t) => t.id === final.id)
+      if (saved && isUpcoming(saved) && (!live || !isUpcoming(live))) {
+        toast("Saved", { description: `${title} will show up ${upcomingLabel(saved)}.` })
+      }
     }
     close()
   }

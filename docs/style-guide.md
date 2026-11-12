@@ -23,6 +23,15 @@ Rules that follow from this:
 3. **Nothing punishing.** No red for "you're behind" except true overdue dates. Parked, reopened and skipped are neutral or warm, not red.
 4. **Everything is undoable.** Destructive or state-changing actions toast with **Undo** instead of asking "Are you sure?" first. Confirmation dialogs are only for things that can't be undone (leaving a household, erasing a phone).
 5. **Low reading load.** Short labels, sentence case, one idea per line of helper text.
+6. **Today first.** Screens answer "what should I do today?". A repeating task's next occurrence
+   stays hidden until its day (daily) or week, Sunday first (weekly), begins; the Tasks view keeps
+   them in a collapsed **Coming up** section so parents can still find and edit them. When saving
+   or finishing makes a task disappear, the toast says when it will show up ("back tomorrow").
+7. **Missed isn't failed.** Only a real due date can make something overdue. A repeating task with
+   no due date is open-ended: if its day or week passes, it quietly starts fresh (steps and progress
+   reset, "where you left off" kept). Finished tasks show under **Recently done** for 7 days, then
+   clear away on their own; one with a list attached moves to **Saved lists** until someone deletes
+   it. The rules live in `src/lib/schedule.ts` and the store's `tidy()`.
 
 ---
 
