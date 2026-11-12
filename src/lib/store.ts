@@ -1,7 +1,7 @@
 import { create } from "zustand"
 import { createJSONStorage, persist } from "zustand/middleware"
 import { addDays } from "date-fns"
-import { isExpiredDone, isOpenEnded, nextOccurrence, periodStart } from "./schedule"
+import { carryTime, isExpiredDone, isOpenEnded, nextOccurrence, periodStart } from "./schedule"
 import { dayKey, storage, uid } from "./storage"
 import type { FocusSession, ListItem, Member, Project, Settings, Task } from "./types"
 
@@ -242,6 +242,7 @@ export const useStore = create<State & Actions>()(
               steps: t.steps.map((s) => ({ ...s, done: false })),
               dueAt: next.dueAt,
               showFrom: next.showFrom,
+              startAt: next.startAt,
               timeSpentMin: 0,
               dailyMin: {},
               resumeNote: undefined,
@@ -383,6 +384,7 @@ export const useStore = create<State & Actions>()(
               return {
                 ...out,
                 showFrom: start.toISOString(),
+                startAt: t.startAt ? carryTime(t.startAt, periodStart(t.recurrence, new Date(t.startAt)), start) : undefined,
                 status: t.status === "parked" ? ("parked" as const) : ("todo" as const),
                 progress: 0,
                 steps: t.steps.map((st) => ({ ...st, done: false })),

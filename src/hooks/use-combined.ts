@@ -2,7 +2,7 @@ import { useMemo } from "react"
 import { useNow } from "./use-media-query"
 import { isMine } from "./use-ranked"
 import { displayName, LOCAL, useParked } from "@/lib/households"
-import { rankTasks, type Scored } from "@/lib/priority"
+import { byReadiness, rankTasks, type Scored } from "@/lib/priority"
 import { useStore } from "@/lib/store"
 import { dayKey } from "@/lib/storage"
 import type { ListItem, Member, Project } from "@/lib/types"
@@ -93,7 +93,7 @@ export function useCombined(): Combined {
       }
     }
     // Same scoring everywhere, so scores compare fairly across households
-    items.sort((a, b) => Number(a.blocked) - Number(b.blocked) || b.score - a.score)
+    items.sort(byReadiness)
     return { items, doneToday, spaces, needsIdentity }
   }, [minute, active, households, members, projects, tasks, listItems, history, me, parked])
 }

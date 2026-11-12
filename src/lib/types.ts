@@ -36,6 +36,8 @@ export interface Task {
   status: Status
   importance: Importance
   dueAt?: string // ISO
+  /** "Not before": kept off "Your one thing" until this time. With dueAt it makes a window (5–6 PM). */
+  startAt?: string // ISO
   estimateMin: number
   progress: number // 0-100, used when there are no steps
   steps: Step[]

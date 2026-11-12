@@ -24,6 +24,16 @@ export function formatDue(iso?: string, now = new Date()): { label: string; tone
   return { label: format(d, "MMM d"), tone: "later" }
 }
 
+/** "From 5 PM", "Tomorrow from 5 PM", "Fri from 9 AM", "From Nov 20" */
+export function formatStart(iso: string, now = new Date()): string {
+  const d = new Date(iso)
+  const time = format(d, "h:mm a").replace(":00", "")
+  if (isToday(d)) return `From ${time}`
+  if (isTomorrow(d)) return `Tomorrow from ${time}`
+  if (differenceInCalendarDays(d, now) < 7) return `${format(d, "EEE")} from ${time}`
+  return `From ${format(d, "MMM d")}`
+}
+
 /** Value for <input type="datetime-local"> */
 export function toLocalInput(iso?: string): string {
   if (!iso) return ""

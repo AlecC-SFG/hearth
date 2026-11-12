@@ -1,9 +1,9 @@
-import { Check, Clock, Play, RotateCcw } from "lucide-react"
+import { Check, Clock, Hourglass, Play, RotateCcw } from "lucide-react"
 import { ListChip } from "@/components/checklist"
 import { Button } from "@/components/ui/button"
 import { AvatarStack, BlockedChip, Chip, DueChip, ProgressBar, ScoreBadge, UnblocksChip } from "@/components/bits"
 import { completeTask, requestFocus } from "@/lib/actions"
-import { formatMinutes } from "@/lib/format"
+import { formatMinutes, formatStart } from "@/lib/format"
 import type { Scored } from "@/lib/priority"
 import { useStore } from "@/lib/store"
 import { useUI } from "@/lib/ui"
@@ -74,6 +74,7 @@ export function TaskRow({ s, showScore = true }: { s: Scored; showScore?: boolea
             </Chip>
           )}
           <ListChip taskId={task.id} />
+          {s.notYet && task.startAt && <Chip icon={<Hourglass />}>{formatStart(task.startAt)}</Chip>}
           <DueChip iso={task.dueAt} recurring={task.recurrence !== "none"} />
           {s.remainingMin > 0 && <Chip icon={<Clock />}>{formatMinutes(s.remainingMin)} left</Chip>}
           {s.blocked && <BlockedChip count={s.blockedBy.length} />}

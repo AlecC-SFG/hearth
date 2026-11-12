@@ -11,7 +11,7 @@ import { useCombined, type CombinedItem } from "@/hooks/use-combined"
 import { useMe } from "@/hooks/use-ranked"
 import { actIn, completeTask, requestFocus } from "@/lib/actions"
 import { refreshParked } from "@/lib/households"
-import { formatMinutes, greeting } from "@/lib/format"
+import { formatMinutes, formatStart, greeting } from "@/lib/format"
 import type { Scored, ScorePart } from "@/lib/priority"
 import { useStore } from "@/lib/store"
 import type { Energy } from "@/lib/types"
@@ -90,7 +90,7 @@ export function NowView() {
   const candidates = useMemo(
     () =>
       mine
-        .filter((s) => !s.blocked && s.task.status !== "parked")
+        .filter((s) => !s.blocked && !s.notYet && s.task.status !== "parked")
         .filter((s) => time === "any" || s.remainingMin <= Number(time))
         .filter((s) => energy === "any" || ENERGY_RANK[s.task.energy] <= ENERGY_RANK[energy])
         .slice(0, 3),
@@ -110,6 +110,10 @@ export function NowView() {
   /** Run an action on the hero's task, switching to its household first if needed */
   const act = (item: CombinedItem, fn: () => void) => void actIn(item.spaceId, item.spaceName, fn)
   const doing = allDoing.filter((s) => s.task.id !== hero?.task.id)
+  // Soonest task whose start time hasn't come yet, for a kind "next up" when nothing else fits
+  const laterToday = mine
+    .filter((s) => s.notYet && !s.blocked && s.task.status !== "parked" && s.task.startAt)
+    .sort((a, b) => a.task.startAt!.localeCompare(b.task.startAt!))[0]
 
   const setFilter = (fn: () => void) => {
     fn()
@@ -354,7 +358,11 @@ export function NowView() {
         </article>
       ) : (
         <div className="rounded-3xl border border-dashed bg-card/50">
-          {mine.length === 0 ? (
+          {laterToday && time === "any" && energy === "any" && mine.every((s) => s.notYet || s.blocked || s.task.status === "parked") ? (
+            <EmptyState emoji="☕" title="Nothing to start just yet">
+              Next up: <span className="font-medium text-foreground">{laterToday.task.title}</span>, {formatStart(laterToday.task.startAt!).replace(/^From/, "from")}. Rest counts too.
+            </EmptyState>
+          ) : mine.length === 0 ? (
             <EmptyState emoji="🌤️" title="All clear!">
               Nothing on your list right now. Enjoy it, or add something new.
               <div className="mt-4">

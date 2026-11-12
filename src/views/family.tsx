@@ -44,7 +44,7 @@ export function FamilyView() {
   const editTask = useUI((u) => u.editTask)
   const [editing, setEditing] = useState<Member | "new" | null>(null)
 
-  const anyone = ranked.filter((s) => s.task.assigneeIds.length === 0 && !s.blocked).slice(0, 6)
+  const anyone = ranked.filter((s) => s.task.assigneeIds.length === 0 && !s.blocked && !s.notYet).slice(0, 6)
 
   return (
     <div className="space-y-6">
@@ -61,7 +61,7 @@ export function FamilyView() {
           const week = weekCount(history, m.id)
           const st = streak(history, m.id)
           const focusing = focus?.memberId === m.id ? tasks.find((t) => t.id === focus.taskId) : undefined
-          const next = ranked.find((s) => isMine(s.task, m.id) && !s.blocked && s.task.status !== "parked")
+          const next = ranked.find((s) => isMine(s.task, m.id) && !s.blocked && !s.notYet && s.task.status !== "parked")
           const isMe = me?.id === m.id
           return (
             <article key={m.id} className={cn("relative rounded-2xl border bg-card p-4", isMe && "border-primary/50 ring-1 ring-primary/30")}>

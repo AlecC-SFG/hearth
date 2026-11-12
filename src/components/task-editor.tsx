@@ -59,6 +59,13 @@ function quickDue(kind: "today" | "tomorrow" | "weekend"): string {
   return d.toISOString()
 }
 
+/** Today at a given hour (local) */
+function atHour(h: number): string {
+  const d = new Date()
+  d.setHours(h, 0, 0, 0)
+  return d.toISOString()
+}
+
 export function TaskEditor() {
   const editing = useUI((s) => s.editing)
   const newDefaults = useUI((s) => s.newDefaults)
@@ -302,6 +309,36 @@ export function TaskEditor() {
             className="h-10 rounded-xl"
             aria-label="Due date and time"
           />
+        </Field>
+
+        <Field label="Not before" hint="stays off “Your one thing” until then">
+          <div className="flex flex-wrap gap-2">
+            <Pill active={!draft.startAt} onClick={() => set({ startAt: undefined })}>
+              Any time
+            </Pill>
+            {draft.dueAt ? (
+              [1, 2].map((h) => {
+                const iso = new Date(new Date(draft.dueAt!).getTime() - h * 3_600_000).toISOString()
+                return (
+                  <Pill key={h} active={draft.startAt === iso} onClick={() => set({ startAt: iso })}>
+                    {h} {h === 1 ? "hour" : "hours"} before it's due
+                  </Pill>
+                )
+              })
+            ) : (
+              <Pill onClick={() => set({ startAt: atHour(17) })}>This evening</Pill>
+            )}
+          </div>
+          <Input
+            type="datetime-local"
+            value={toLocalInput(draft.startAt)}
+            onChange={(e) => set({ startAt: fromLocalInput(e.target.value) })}
+            className="h-10 rounded-xl"
+            aria-label="Not before: date and time"
+          />
+          {draft.startAt && draft.dueAt && draft.startAt >= draft.dueAt && (
+            <p className="rounded-xl bg-warm/15 p-2 text-xs">This starts after it's due. Pick an earlier start, or a later due time.</p>
+          )}
         </Field>
 
         <Field label="How long will it take?" hint={`${formatMinutes(draft.estimateMin)} total`}>

@@ -55,21 +55,47 @@ export function upcomingLabel(t: Task, now = new Date()): string {
 }
 
 /**
+ * Move a clock time to a new anchor, keeping its day offset and time of day
+ * (so 5 PM stays 5 PM across daylight-saving changes).
+ */
+export function carryTime(iso: string, oldAnchor: Date, newAnchor: Date): string {
+  const t = new Date(iso)
+  const d = addDays(startOfDay(newAnchor), differenceInCalendarDays(t, oldAnchor))
+  d.setHours(t.getHours(), t.getMinutes(), 0, 0)
+  return d.toISOString()
+}
+
+/** Not startable yet: its "not before" time is still ahead (unless someone already started it). */
+export function isNotYet(t: Task, now = Date.now()): boolean {
+  return !!t.startAt && t.status !== "doing" && t.status !== "done" && new Date(t.startAt).getTime() > now
+}
+
+/**
  * Due date and show-from date for the occurrence after `t`. Never lands in a
  * day or week that has already passed, so a late finish doesn't leave a pile of
  * catch-up copies behind.
  */
-export function nextOccurrence(t: Task, now = new Date()): { dueAt?: string; showFrom: string } {
+export function nextOccurrence(t: Task, now = new Date()): { dueAt?: string; showFrom: string; startAt?: string } {
   const r = t.recurrence
   const current = periodStart(r, now)
   if (t.dueAt) {
-    let next = nextPeriod(r, new Date(t.dueAt))
+    const due = new Date(t.dueAt)
+    let next = nextPeriod(r, due)
     while (periodStart(r, next) < current) next = nextPeriod(r, next)
-    return { dueAt: next.toISOString(), showFrom: periodStart(r, next).toISOString() }
+    return {
+      dueAt: next.toISOString(),
+      showFrom: periodStart(r, next).toISOString(),
+      // Same window as before: "from 5 PM" stays "from 5 PM"
+      startAt: t.startAt ? carryTime(t.startAt, due, next) : undefined,
+    }
   }
   const own = t.showFrom ? periodStart(r, new Date(t.showFrom)) : current
   const base = own > current ? own : current
-  return { showFrom: nextPeriod(r, base).toISOString() }
+  const next = nextPeriod(r, base)
+  return {
+    showFrom: next.toISOString(),
+    startAt: t.startAt ? carryTime(t.startAt, periodStart(r, new Date(t.startAt)), next) : undefined,
+  }
 }
 
 /** Finished long enough ago to clear away (or to move to saved lists). */

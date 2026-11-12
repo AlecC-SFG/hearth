@@ -1,5 +1,14 @@
 [
   {
+    "version": "0.7.0",
+    "date": "2026-11-12",
+    "changes": [
+      "Give a task a “Not before” time, like 5 PM for cooking dinner. It stays off “Your one thing” until then, and waits under Later in Tasks.",
+      "With a due time too, that makes a window (5 to 6 PM). Repeating tasks keep the same window every day or week.",
+      "If everything left has to wait, “Your one thing” tells you what's next and when."
+    ]
+  },
+  {
     "version": "0.6.0",
     "date": "2026-11-12",
     "changes": [

@@ -1,4 +1,4 @@
-import { isUpcoming } from "./schedule"
+import { isNotYet, isUpcoming } from "./schedule"
 import type { Task } from "./types"
 
 export interface ScorePart {
@@ -17,6 +17,8 @@ export interface Scored {
   blockedBy: Task[]
   unblocks: Task[] // open tasks waiting on this one (transitive)
   overdue: boolean
+  /** Has a "not before" time that hasn't come yet */
+  notYet: boolean
 }
 
 const HOUR = 3_600_000
@@ -113,7 +115,7 @@ export function scoreTask(task: Task, all: Task[], now = Date.now()): Scored {
   if (task.status === "parked") score *= 0.6
   score = Math.round(Math.min(100, Math.max(0, score)))
 
-  return { task, score, parts, progress, remainingMin, blocked, blockedBy, unblocks, overdue }
+  return { task, score, parts, progress, remainingMin, blocked, blockedBy, unblocks, overdue, notYet: isNotYet(task, now) }
 }
 
 /** Open tasks for today, best first. Repeating tasks whose day or week hasn't come yet are left out. */
@@ -121,7 +123,12 @@ export function rankTasks(tasks: Task[], now = Date.now()): Scored[] {
   return tasks
     .filter((t) => t.status !== "done" && !isUpcoming(t, now))
     .map((t) => scoreTask(t, tasks, now))
-    .sort((a, b) => Number(a.blocked) - Number(b.blocked) || b.score - a.score)
+    .sort(byReadiness)
+}
+
+/** Startable tasks first, then ones whose start time hasn't come, then blocked; best score first within each. */
+export function byReadiness(a: Scored, b: Scored): number {
+  return Number(a.blocked) - Number(b.blocked) || Number(a.notYet) - Number(b.notYet) || b.score - a.score
 }
 
 /** Would adding `depId` as a dependency of `taskId` create a cycle? */

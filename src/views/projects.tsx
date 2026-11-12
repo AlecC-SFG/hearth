@@ -176,7 +176,7 @@ export function ProjectsView() {
             const total = pt.reduce((m, t) => m + t.estimateMin, p.clearedMin ?? 0)
             const left = open.reduce((m, s) => m + s.remainingMin, 0)
             const pct = total ? (total - left) / total : 0
-            const next = open.find((s) => !s.blocked)
+            const next = open.find((s) => !s.blocked && !s.notYet) ?? open.find((s) => !s.blocked)
             const blockedCount = open.filter((s) => s.blocked).length
             return (
               <article

@@ -32,6 +32,11 @@ Rules that follow from this:
    reset, "where you left off" kept). Finished tasks show under **Recently done** for 7 days, then
    clear away on their own; one with a list attached moves to **Saved lists** until someone deletes
    it. The rules live in `src/lib/schedule.ts` and the store's `tidy()`.
+8. **Not before.** A task can have a start time (`startAt`, the editor's "Not before" field); with a
+   due time it forms a window. Until then it never appears on "Your one thing" or as a family
+   member's "next" task, and in Tasks it waits under **Later** with an hourglass "From 5 PM" chip.
+   Repeating tasks keep the same window each day or week. If only waiting tasks are left, Now says
+   what's next and when instead of showing an empty list.
 
 ---
 

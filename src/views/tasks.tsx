@@ -51,6 +51,7 @@ export function PriorityExplainer() {
           <li><b className="text-foreground">Blocker</b>: rises when other tasks are waiting on this one.</li>
           <li><b className="text-foreground">Finish line</b>: tasks that are mostly done get a boost, so they get finished before new ones start.</li>
           <li><b className="text-foreground">Quick wins</b>: anything with under 15 minutes left gets a small boost.</li>
+          <li><b className="text-foreground">Not before</b>: a task with a start time waits under Later until then.</li>
         </ul>
         <p className="mt-2 text-muted-foreground">Tasks waiting on something sink to the bottom until they're unblocked.</p>
       </PopoverContent>
@@ -82,7 +83,8 @@ export function TasksView() {
   }, [q, who, me?.id, projectFilter])
 
   const list = ranked.filter((s) => match(s.task))
-  const ready = list.filter((s) => !s.blocked && s.task.status !== "parked")
+  const ready = list.filter((s) => !s.blocked && !s.notYet && s.task.status !== "parked")
+  const later = list.filter((s) => !s.blocked && s.notYet && s.task.status !== "parked")
   const blocked = list.filter((s) => s.blocked && s.task.status !== "parked")
   const parked = list.filter((s) => s.task.status === "parked")
   const now = useNow(60_000)
@@ -148,7 +150,7 @@ export function TasksView() {
         </div>
       </div>
 
-      {ready.length + blocked.length + parked.length + done.length + upcoming.length + saved.length === 0 ? (
+      {ready.length + later.length + blocked.length + parked.length + done.length + upcoming.length + saved.length === 0 ? (
         <EmptyState emoji="📝" title={q ? "No matches" : "Nothing here yet"}>
           {q ? "Try a different search." : "Add your first task with the + button."}
         </EmptyState>
@@ -156,6 +158,9 @@ export function TasksView() {
         <div className="space-y-6">
           <Section title="Ready to go" count={ready.length} hint="highest priority first">
             {ready.map((s) => <TaskRow key={s.task.id} s={s} />)}
+          </Section>
+          <Section title="Later" count={later.length} hint="not time to start yet">
+            {[...later].sort((a, b) => a.task.startAt!.localeCompare(b.task.startAt!)).map((s) => <TaskRow key={s.task.id} s={s} />)}
           </Section>
           <Section title="Waiting on something" count={blocked.length}>
             {blocked.map((s) => <TaskRow key={s.task.id} s={s} />)}
