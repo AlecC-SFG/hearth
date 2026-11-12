@@ -173,7 +173,17 @@ export function SettingsDialog() {
             <Button variant="ghost" className="text-destructive" onClick={() => setConfirmReset(true)}>
               Erase this phone & start over
             </Button>
-            <span className="text-xs text-muted-foreground tabular-nums">Hearth {APP_VERSION}</span>
+            <button
+              type="button"
+              onClick={() => {
+                useUI.getState().setSettingsOpen(false)
+                useUI.getState().setWhatsNewOpen(true)
+              }}
+              className="rounded-md text-xs text-muted-foreground tabular-nums underline-offset-2 outline-none hover:text-foreground hover:underline focus-visible:ring-3 focus-visible:ring-ring/40"
+              title="What's new"
+            >
+              Hearth {APP_VERSION} · What's new
+            </button>
           </div>
         </div>
       </ResponsiveModal>

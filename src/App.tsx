@@ -29,6 +29,7 @@ import { HearthLogo } from "@/components/logo"
 import { Onboarding } from "@/components/onboarding"
 import { SettingsDialog } from "@/components/settings-dialog"
 import { TaskEditor } from "@/components/task-editor"
+import { WhatsNew } from "@/components/whats-new"
 import { WipGuard } from "@/components/wip-guard"
 import { useNow } from "@/hooks/use-media-query"
 import { isMine, useMe, useRanked } from "@/hooks/use-ranked"
@@ -312,6 +313,7 @@ export default function App() {
           {joinCode && <JoinFromLink code={joinCode} onDone={() => setJoinCode(undefined)} />}
           <TaskEditor />
           <ChecklistSheet />
+          <WhatsNew />
           <WipGuard />
           <SettingsDialog />
           <CommandPalette />

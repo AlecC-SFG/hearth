@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react"
 import { addDays, nextSaturday } from "date-fns"
-import { Check, CheckCircle2, ChevronDown, GripVertical, ListChecks, Lock, Plus, RotateCcw, Trash2, X } from "lucide-react"
+import { Check, CheckCircle2, ChevronDown, CopyPlus, GripVertical, ListChecks, Lock, Plus, RotateCcw, Trash2, X } from "lucide-react"
 import { formatDistanceToNow } from "date-fns"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
@@ -11,7 +11,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { ResponsiveModal } from "@/components/responsive-modal"
 import { MemberAvatar, Segmented } from "@/components/bits"
 import { Checklist, useListItems } from "@/components/checklist"
-import { deleteTask, reopenWithToast } from "@/lib/actions"
+import { deleteTask, reopenWithToast, repeatWithToast } from "@/lib/actions"
 import { formatMinutes, fromLocalInput, toLocalInput } from "@/lib/format"
 import { createsCycle } from "@/lib/priority"
 import { isUpcoming, upcomingLabel } from "@/lib/schedule"
@@ -212,9 +212,22 @@ export function TaskEditor() {
               </div>
               {live.completedAt && <div className="text-xs text-muted-foreground">{formatDistanceToNow(new Date(live.completedAt), { addSuffix: true })}</div>}
             </div>
-            <Button type="button" size="sm" variant="outline" onClick={() => reopenWithToast(live.id)}>
-              <RotateCcw /> Not done yet
-            </Button>
+            <div className="flex flex-wrap justify-end gap-2">
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={() => {
+                  repeatWithToast(live.id)
+                  close()
+                }}
+              >
+                <CopyPlus /> Do it again
+              </Button>
+              <Button type="button" size="sm" variant="ghost" onClick={() => reopenWithToast(live.id)}>
+                <RotateCcw /> Not done yet
+              </Button>
+            </div>
           </div>
         )}
         {live?.status !== "done" && live?.reopenedBy && (

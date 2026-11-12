@@ -51,7 +51,7 @@ export default defineConfig({
         ],
       },
       workbox: {
-        globPatterns: ['**/*.{js,css,html,svg,png,ico,woff2}'],
+        globPatterns: ['**/*.{js,css,html,svg,png,ico,woff2,json}'],
         // New versions take over right away (src/lib/pwa.ts then offers a reload).
         // Must stay on: phones on 0.3.1 and earlier rely on it to update at all.
         skipWaiting: true,

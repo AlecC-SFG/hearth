@@ -9,7 +9,8 @@
  *   - show "New version ready" with a Reload button when a new version takes over,
  *   - never reload by surprise while someone is typing; if the app goes into the
  *     background with an update waiting and nothing is half-edited, reload then,
- *   - after an update, say which version is now running.
+ *   - after an update, say which version is now running,
+ *   - offer "What's new" on both notices (notes come from public/whats-new.json).
  */
 import { toast } from "sonner"
 import { APP_VERSION } from "./feedback"
@@ -55,6 +56,7 @@ export function setupPwa() {
       description: "Tap Reload to update. Nothing you've saved will be lost.",
       duration: Infinity,
       action: { label: "Reload", onClick: () => location.reload() },
+      cancel: { label: "What's new", onClick: () => useUI.getState().setWhatsNewOpen(true) },
     })
   })
 
@@ -69,7 +71,10 @@ export function announceUpdate() {
     const last = localStorage.getItem(LAST_VERSION_KEY)
     localStorage.setItem(LAST_VERSION_KEY, APP_VERSION)
     if (last && shortVersion(last) !== shortVersion(APP_VERSION)) {
-      toast.success(`Hearth updated to ${shortVersion(APP_VERSION)}`, { duration: 4000 })
+      toast.success(`Hearth updated to ${shortVersion(APP_VERSION)}`, {
+        duration: 8000,
+        action: { label: "What's new", onClick: () => useUI.getState().setWhatsNewOpen(true) },
+      })
     }
   } catch {
     /* storage unavailable */

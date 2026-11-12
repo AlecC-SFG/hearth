@@ -1,0 +1,35 @@
+[
+  {
+    "version": "0.6.0",
+    "date": "2026-11-12",
+    "changes": [
+      "“Do it again” on a finished task adds a fresh copy to your list. The finished one stays finished, and its list comes along, unchecked.",
+      "“What's new” on the update message shows what changed, like this."
+    ]
+  },
+  {
+    "version": "0.5.0",
+    "date": "2026-11-12",
+    "changes": [
+      "Repeating tasks wait for their day. Tomorrow's homework shows up tomorrow, and weekly tasks show up the week they're due.",
+      "Repeating tasks with no due date never go overdue. If a day slips by, they just start fresh.",
+      "Finished tasks clear away after 7 days. Ones with a list are kept under Saved lists in Tasks.",
+      "Hidden repeating tasks are listed under Coming up in Tasks, so you can still find and edit them."
+    ]
+  },
+  {
+    "version": "0.4.1",
+    "date": "2026-11-11",
+    "changes": [
+      "Rename your household from Settings.",
+      "Households with the same name get a short label so you can tell them apart."
+    ]
+  },
+  {
+    "version": "0.4.0",
+    "date": "2026-11-11",
+    "changes": [
+      "“Your one thing” now picks from every household on your phone, with a switch to show just one."
+    ]
+  }
+]

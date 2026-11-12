@@ -1,8 +1,8 @@
 import { useMemo, useState, type ReactNode } from "react"
-import { ChevronDown, Info, ListChecks, Plus, RotateCcw, Search, Trash2 } from "lucide-react"
+import { ChevronDown, CopyPlus, Info, ListChecks, Plus, RotateCcw, Search, Trash2 } from "lucide-react"
 import { format, formatDistanceToNow } from "date-fns"
 import { toast } from "sonner"
-import { reopenWithToast } from "@/lib/actions"
+import { reopenWithToast, repeatWithToast } from "@/lib/actions"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
@@ -188,6 +188,9 @@ export function TasksView() {
                   <Button size="sm" variant="outline" onClick={() => reopenWithToast(t.id)}>
                     <RotateCcw /> Not done yet
                   </Button>
+                  <Button size="icon-sm" variant="ghost" aria-label={`Do “${t.title}” again`} title="Do it again" onClick={() => repeatWithToast(t.id)}>
+                    <CopyPlus />
+                  </Button>
                 </div>
               )
             })}
@@ -205,6 +208,9 @@ export function TasksView() {
                 </button>
                 <Button size="sm" variant="outline" onClick={() => openList(t.id)}>
                   Open
+                </Button>
+                <Button size="icon-sm" variant="ghost" aria-label={`Do “${t.title}” again`} title="Do it again" onClick={() => repeatWithToast(t.id)}>
+                  <CopyPlus />
                 </Button>
                 <Button size="icon-sm" variant="ghost" aria-label={`Delete list: ${t.title}`} title="Delete list" onClick={() => deleteSaved(t.id)}>
                   <Trash2 />

@@ -9,6 +9,11 @@ built for ADHD-friendly prioritization. Live at https://alecc-sfg.github.io/hear
 the design principles, color tokens, typography, component patterns, motion, copy voice and the
 pre-ship checklist. If a change makes the guide out of date, update the guide in the same commit.
 
+## Releases
+
+Bump the version in package.json and add a newest-first entry to `public/whats-new.json`
+(shown by the in-app "What's new" popup) in the same commit.
+
 ## Notes
 
 - Local builds in Git Bash on Windows need `MSYS2_ENV_CONV_EXCL='*'` so `BASE_PATH` isn't mangled.

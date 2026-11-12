@@ -54,6 +54,8 @@ interface Actions {
   completeTask(id: string, memberId?: string): string | undefined
   /** Put a completed task back. undo = quietly reverse a mis-tap (no "reopened by" tag). */
   reopenTask(id: string, opts?: { undo?: boolean }): void
+  /** "Do it again": a fresh one-time copy of a task (and its list), leaving the original as it is */
+  repeatTask(id: string): string | undefined
   /** Daily housekeeping: fresh starts for open-ended repeating tasks, clear away old finished ones */
   tidy(now?: Date): void
   addListItem(taskId: string, text: string): string
@@ -330,6 +332,29 @@ export const useStore = create<State & Actions>()(
             listItems: dropNext ? s.listItems.filter((i) => i.taskId !== next!.id) : s.listItems,
           }
         })
+      },
+
+      repeatTask(id) {
+        const t = get().tasks.find((x) => x.id === id)
+        if (!t) return
+        const copy = makeTask({
+          title: t.title,
+          notes: t.notes,
+          projectId: t.projectId,
+          assigneeIds: t.assigneeIds,
+          importance: t.importance,
+          estimateMin: t.estimateMin,
+          energy: t.energy,
+          resources: t.resources,
+          steps: t.steps.map((s) => ({ ...s, id: uid(), done: false })),
+          // One time only, no deadline carried over: set a new date in the editor if it needs one
+        })
+        const ts = nowIso()
+        const items = get()
+          .listItems.filter((i) => i.taskId === id)
+          .map((i) => ({ ...i, id: uid(), taskId: copy.id, done: false, doneBy: undefined, createdAt: ts }))
+        set((s) => ({ tasks: [copy, ...s.tasks], listItems: items.length ? [...s.listItems, ...items] : s.listItems }))
+        return copy.id
       },
 
       tidy(now = new Date()) {

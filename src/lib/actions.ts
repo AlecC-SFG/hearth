@@ -82,6 +82,18 @@ export function parkTask(id: string) {
   })
 }
 
+/** "Do it again": add a fresh copy to the list; the finished one stays finished. */
+export function repeatWithToast(id: string) {
+  const s = useStore.getState()
+  const t = s.tasks.find((x) => x.id === id)
+  const copyId = s.repeatTask(id)
+  if (!t || !copyId) return
+  toast.success("Added back to your list", {
+    description: t.title,
+    action: { label: "Undo", onClick: () => useStore.getState().removeTask(copyId) },
+  })
+}
+
 /** "Not done yet": put a completed task back, tagged with who reopened it. */
 export function reopenWithToast(id: string) {
   const s = useStore.getState()

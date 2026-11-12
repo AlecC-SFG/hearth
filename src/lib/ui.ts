@@ -27,6 +27,8 @@ interface UIState {
   listTaskId?: string
   openList(taskId: string): void
   closeList(): void
+  whatsNewOpen: boolean
+  setWhatsNewOpen(o: boolean): void
 }
 
 export const useUI = create<UIState>()((set) => ({
@@ -57,4 +59,6 @@ export const useUI = create<UIState>()((set) => ({
   setProjectFilter: (projectFilter) => set({ projectFilter }),
   openList: (listTaskId) => set({ listTaskId }),
   closeList: () => set({ listTaskId: undefined }),
+  whatsNewOpen: false,
+  setWhatsNewOpen: (whatsNewOpen) => set({ whatsNewOpen }),
 }))

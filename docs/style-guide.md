@@ -196,6 +196,15 @@ disable the button.
 - `toast.error` with the error's own message (`friendlyError` for sync), never a stack trace.
 - Description is the task title or one short sentence. Keep durations default; 8s for warnings people need to read.
 
+**Finished tasks** offer two ways back: **Not done yet** (outline; puts the same task back) and
+**Do it again** (`CopyPlus`; adds a fresh one-time copy, unchecked list included, and the finished
+one stays finished). Both toast with Undo.
+
+**Update notices** ("A new version of Hearth is ready", "Hearth updated to …") carry a
+**What's new** button that opens `WhatsNew`. The notes come from `public/whats-new.json`: every
+release adds an entry there, newest first, in this guide's voice (one plain sentence per change,
+written for the family, not for developers). Settings links to the same popup from the version line.
+
 **Numbers.** Counts that change on screen use `NumberFlow`. Scores are 0–100 integers in a
 `ScoreBadge`, colored by `scoreTone()` (hot ≥ 60, warm ≥ 35, calm below).
 
@@ -216,7 +225,7 @@ characters of the join code when two households on the phone share a name.
 
 Hearth sounds like a kind, practical family member: warm, brief, never nagging.
 
-- **Do:** "Your one thing", "Park it", "It's done", "Not done yet", "Unblocks 2", "Waiting on 1",
+- **Do:** "Your one thing", "Park it", "It's done", "Not done yet", "Do it again", "Unblocks 2", "Waiting on 1",
   "Nice, there's room now", "Fewer open loops means more actually gets done."
 - **Don't:** guilt ("You failed to…"), shouting, jargon ("WIP", "sync conflict", "RLS"), or
   exclamation marks on anything other than wins.
